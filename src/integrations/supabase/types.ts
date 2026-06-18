@@ -14,7 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      role_weights: {
+        Row: {
+          role: string
+          updated_at: string
+          weights: Json
+        }
+        Insert: {
+          role: string
+          updated_at?: string
+          weights?: Json
+        }
+        Update: {
+          role?: string
+          updated_at?: string
+          weights?: Json
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
