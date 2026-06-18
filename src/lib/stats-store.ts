@@ -60,14 +60,17 @@ export function computePercentiles(rows: PlayerRow[], columns: string[]): Map<st
   return result;
 }
 
+// Strict: only columns whose values are pure numbers (no currency symbols, letters, spaces, slashes)
+const PURE_NUM_RE = /^-?\d+(?:[.,]\d+)?$/;
 export function isNumericColumn(rows: PlayerRow[], col: string): boolean {
   let hits = 0, total = 0;
-  for (let i = 0; i < Math.min(rows.length, 50); i++) {
+  for (let i = 0; i < Math.min(rows.length, 80); i++) {
     const v = rows[i][col];
     if (v === null || v === undefined || v === "") continue;
     total++;
-    const n = typeof v === "number" ? v : parseFloat(String(v));
-    if (!Number.isNaN(n) && Number.isFinite(n)) hits++;
+    if (typeof v === "number" && Number.isFinite(v)) { hits++; continue; }
+    const s = String(v).trim();
+    if (PURE_NUM_RE.test(s)) hits++;
   }
-  return total > 0 && hits / total > 0.7;
+  return total > 0 && hits / total > 0.9;
 }
