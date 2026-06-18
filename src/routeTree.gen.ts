@@ -9,6 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as NunoStatsAttRouteImport } from './routes/nuno-stats-att'
+import { Route as MetricasGeminiRouteImport } from './routes/metricas-gemini'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StatsIndexRouteImport } from './routes/stats.index'
@@ -22,6 +24,16 @@ import { Route as AttWeightsRouteImport } from './routes/att.weights'
 import { Route as AttTableRouteImport } from './routes/att.table'
 import { Route as StatsAttPlayerKeyRouteImport } from './routes/stats-att.player.$key'
 
+const NunoStatsAttRoute = NunoStatsAttRouteImport.update({
+  id: '/nuno-stats-att',
+  path: '/nuno-stats-att',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetricasGeminiRoute = MetricasGeminiRouteImport.update({
+  id: '/metricas-gemini',
+  path: '/metricas-gemini',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -86,6 +98,8 @@ const StatsAttPlayerKeyRoute = StatsAttPlayerKeyRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/metricas-gemini': typeof MetricasGeminiRoute
+  '/nuno-stats-att': typeof NunoStatsAttRoute
   '/att/table': typeof AttTableRoute
   '/att/weights': typeof AttWeightsRoute
   '/stats-att/table': typeof StatsAttTableRoute
@@ -100,6 +114,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/metricas-gemini': typeof MetricasGeminiRoute
+  '/nuno-stats-att': typeof NunoStatsAttRoute
   '/att/table': typeof AttTableRoute
   '/att/weights': typeof AttWeightsRoute
   '/stats-att/table': typeof StatsAttTableRoute
@@ -115,6 +131,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/metricas-gemini': typeof MetricasGeminiRoute
+  '/nuno-stats-att': typeof NunoStatsAttRoute
   '/att/table': typeof AttTableRoute
   '/att/weights': typeof AttWeightsRoute
   '/stats-att/table': typeof StatsAttTableRoute
@@ -131,6 +149,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/metricas-gemini'
+    | '/nuno-stats-att'
     | '/att/table'
     | '/att/weights'
     | '/stats-att/table'
@@ -145,6 +165,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/metricas-gemini'
+    | '/nuno-stats-att'
     | '/att/table'
     | '/att/weights'
     | '/stats-att/table'
@@ -159,6 +181,8 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/dashboard'
+    | '/metricas-gemini'
+    | '/nuno-stats-att'
     | '/att/table'
     | '/att/weights'
     | '/stats-att/table'
@@ -174,6 +198,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  MetricasGeminiRoute: typeof MetricasGeminiRoute
+  NunoStatsAttRoute: typeof NunoStatsAttRoute
   AttTableRoute: typeof AttTableRoute
   AttWeightsRoute: typeof AttWeightsRoute
   StatsAttTableRoute: typeof StatsAttTableRoute
@@ -188,6 +214,20 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/nuno-stats-att': {
+      id: '/nuno-stats-att'
+      path: '/nuno-stats-att'
+      fullPath: '/nuno-stats-att'
+      preLoaderRoute: typeof NunoStatsAttRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metricas-gemini': {
+      id: '/metricas-gemini'
+      path: '/metricas-gemini'
+      fullPath: '/metricas-gemini'
+      preLoaderRoute: typeof MetricasGeminiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -278,6 +318,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  MetricasGeminiRoute: MetricasGeminiRoute,
+  NunoStatsAttRoute: NunoStatsAttRoute,
   AttTableRoute: AttTableRoute,
   AttWeightsRoute: AttWeightsRoute,
   StatsAttTableRoute: StatsAttTableRoute,
