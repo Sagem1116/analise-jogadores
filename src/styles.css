@@ -206,3 +206,180 @@
     0 0 0 1px oklch(0.5 0.25 305 / 0.2),
     inset 0 1px 0 oklch(0.7 0.25 305 / 0.2);
 }
+
+/* ---------- Global neon micro-interactions ---------- */
+
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-120%) skewX(-20deg); }
+  100% { transform: translateX(220%) skewX(-20deg); }
+}
+
+@keyframes neon-border-pulse {
+  0%, 100% { border-color: oklch(0.55 0.22 300 / 0.55); box-shadow: 0 0 0 0 oklch(0.7 0.32 300 / 0); }
+  50% { border-color: oklch(0.78 0.32 300 / 0.95); box-shadow: 0 0 14px oklch(0.7 0.32 300 / 0.55); }
+}
+
+@keyframes neon-particles {
+  0% { background-position: 0 0, 40px 60px, 130px 20px; opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { background-position: 200px 120px, 240px 220px, 330px 180px; opacity: 0.6; }
+}
+
+@keyframes row-glow-in {
+  from { background-color: oklch(0.7 0.32 300 / 0.18); }
+  to   { background-color: oklch(0.7 0.32 300 / 0); }
+}
+
+@layer base {
+  /* Shimmer overlay on every primary button */
+  button.bg-primary,
+  a.bg-primary,
+  [role="button"].bg-primary {
+    overflow: hidden;
+    isolation: isolate;
+  }
+  button.bg-primary::before,
+  a.bg-primary::before,
+  [role="button"].bg-primary::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.35), transparent);
+    width: 40%;
+    transform: translateX(-120%) skewX(-20deg);
+    pointer-events: none;
+    z-index: 1;
+  }
+  button.bg-primary:hover::before,
+  a.bg-primary:hover::before,
+  [role="button"].bg-primary:hover::before {
+    animation: shimmer-sweep 0.9s ease-out;
+  }
+
+  /* Focus rings — neon purple ripple on every interactive control */
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [role="combobox"]:focus-visible {
+    outline: none !important;
+    box-shadow:
+      0 0 0 2px oklch(0.13 0.04 285),
+      0 0 0 4px oklch(0.75 0.32 300 / 0.85),
+      0 0 18px oklch(0.7 0.33 300 / 0.7) !important;
+    transition: box-shadow 0.2s ease;
+  }
+
+  /* Inputs, selects, textareas — luminous border on hover/focus */
+  input, select, textarea, [role="combobox"] {
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  }
+  input:hover, select:hover, textarea:hover, [role="combobox"]:hover {
+    border-color: oklch(0.7 0.3 300 / 0.7);
+    box-shadow: 0 0 10px oklch(0.65 0.3 300 / 0.35);
+  }
+  input:focus, select:focus, textarea:focus, [role="combobox"]:focus {
+    border-color: oklch(0.78 0.32 300 / 0.95);
+    box-shadow: 0 0 0 1px oklch(0.78 0.32 300 / 0.9), 0 0 18px oklch(0.7 0.32 300 / 0.55);
+  }
+
+  /* Native select dropdown arrow tint */
+  select {
+    background-image:
+      linear-gradient(45deg, transparent 50%, oklch(0.85 0.2 300) 50%),
+      linear-gradient(135deg, oklch(0.85 0.2 300) 50%, transparent 50%);
+    background-position: calc(100% - 18px) 50%, calc(100% - 12px) 50%;
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+    padding-right: 28px;
+    appearance: none;
+  }
+}
+
+@utility shimmer {
+  position: relative;
+  overflow: hidden;
+}
+@utility shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, oklch(0.85 0.3 300 / 0.25), transparent);
+  transform: translateX(-100%);
+  animation: shimmer-sweep 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ---------- Table evolution ---------- */
+
+@layer base {
+  /* Animated neon sweep on table header */
+  table thead tr:first-child > th {
+    position: relative;
+    background-image:
+      linear-gradient(180deg, oklch(0.35 0.18 300 / 0.55), oklch(0.22 0.1 290 / 0.55)),
+      linear-gradient(90deg, oklch(0.7 0.32 300 / 0.18), oklch(0.6 0.3 330 / 0.18), oklch(0.7 0.32 300 / 0.18));
+    background-size: auto, 200% 100%;
+    animation: neon-spin 8s linear infinite;
+    text-shadow: 0 0 8px oklch(0.85 0.3 300 / 0.5);
+    border-bottom: 1px solid oklch(0.7 0.3 300 / 0.45) !important;
+  }
+  table thead tr:first-child > th::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: -1px; height: 1px;
+    background: linear-gradient(90deg, transparent, oklch(0.85 0.32 300 / 0.95), transparent);
+    filter: blur(0.5px);
+  }
+
+  /* Row hover — neon underline + gentle lift */
+  table tbody tr {
+    transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  }
+  table tbody tr:hover {
+    background-color: oklch(0.7 0.32 300 / 0.12) !important;
+    box-shadow:
+      inset 0 0 0 1px oklch(0.7 0.32 300 / 0.5),
+      0 0 24px oklch(0.6 0.3 305 / 0.25);
+  }
+  table tbody tr:hover > td {
+    text-shadow: 0 0 6px oklch(0.85 0.3 300 / 0.35);
+  }
+
+  /* Subtle particle layer over table-shell */
+  .table-shell {
+    position: relative;
+  }
+  .table-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(circle, oklch(0.85 0.3 300 / 0.45) 1px, transparent 1.5px),
+      radial-gradient(circle, oklch(0.75 0.28 330 / 0.35) 1px, transparent 1.5px),
+      radial-gradient(circle, oklch(0.8 0.25 280 / 0.3) 1px, transparent 1.5px);
+    background-size: 220px 180px, 280px 240px, 360px 300px;
+    background-position: 0 0, 40px 60px, 130px 20px;
+    animation: neon-particles 18s linear infinite;
+    mix-blend-mode: screen;
+    opacity: 0.35;
+    border-radius: inherit;
+    z-index: 0;
+  }
+  .table-shell > * { position: relative; z-index: 1; }
+}
+
+/* Loading shimmer for skeletons / pending states */
+@utility skeleton-neon {
+  background: linear-gradient(90deg,
+    oklch(0.22 0.05 290) 0%,
+    oklch(0.35 0.12 300) 50%,
+    oklch(0.22 0.05 290) 100%);
+  background-size: 200% 100%;
+  animation: neon-spin 1.6s linear infinite;
+  border-radius: 6px;
+}
+
