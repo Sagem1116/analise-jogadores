@@ -129,17 +129,30 @@ function StatsTable() {
       let ok = true;
       for (const [col, f] of entries) {
         const isRoleCol = selectedRoles.includes(col);
+        const isMoney = MONEY_COLS.has(col);
         const rawVal = isRoleCol ? (roleScores.get(i)?.[col] ?? 0) : p[col];
         if (f.text && f.text.trim()) {
           if (!String(rawVal ?? "").toLowerCase().includes(f.text.toLowerCase())) { ok = false; break; }
         }
         if (f.min !== undefined && f.min !== "") {
-          const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
-          if (Number.isNaN(n) || n < parseFloat(f.min)) { ok = false; break; }
+          const minF = parseFloat(f.min);
+          if (isMoney) {
+            const rng = parseMoney(rawVal);
+            if (!rng || rng[1] < minF) { ok = false; break; }
+          } else {
+            const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
+            if (Number.isNaN(n) || n < minF) { ok = false; break; }
+          }
         }
         if (f.max !== undefined && f.max !== "") {
-          const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
-          if (Number.isNaN(n) || n > parseFloat(f.max)) { ok = false; break; }
+          const maxF = parseFloat(f.max);
+          if (isMoney) {
+            const rng = parseMoney(rawVal);
+            if (!rng || rng[0] > maxF) { ok = false; break; }
+          } else {
+            const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
+            if (Number.isNaN(n) || n > maxF) { ok = false; break; }
+          }
         }
       }
       if (ok) out.push({ p, i });
