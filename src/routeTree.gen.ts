@@ -9,8 +9,26 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as StatsAttRouteImport } from './routes/stats-att'
+import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as AttRouteImport } from './routes/att'
 import { Route as IndexRouteImport } from './routes/index'
 
+const StatsAttRoute = StatsAttRouteImport.update({
+  id: '/stats-att',
+  path: '/stats-att',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AttRoute = AttRouteImport.update({
+  id: '/att',
+  path: '/att',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -19,28 +37,61 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/att': typeof AttRoute
+  '/dashboard': typeof DashboardRoute
+  '/stats-att': typeof StatsAttRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/att': typeof AttRoute
+  '/dashboard': typeof DashboardRoute
+  '/stats-att': typeof StatsAttRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/att': typeof AttRoute
+  '/dashboard': typeof DashboardRoute
+  '/stats-att': typeof StatsAttRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/att' | '/dashboard' | '/stats-att'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/att' | '/dashboard' | '/stats-att'
+  id: '__root__' | '/' | '/att' | '/dashboard' | '/stats-att'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AttRoute: typeof AttRoute
+  DashboardRoute: typeof DashboardRoute
+  StatsAttRoute: typeof StatsAttRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/stats-att': {
+      id: '/stats-att'
+      path: '/stats-att'
+      fullPath: '/stats-att'
+      preLoaderRoute: typeof StatsAttRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/att': {
+      id: '/att'
+      path: '/att'
+      fullPath: '/att'
+      preLoaderRoute: typeof AttRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -53,6 +104,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AttRoute: AttRoute,
+  DashboardRoute: DashboardRoute,
+  StatsAttRoute: StatsAttRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
