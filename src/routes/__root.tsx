@@ -79,14 +79,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "FM Analise Jogadores" },
+      { name: "description", content: "Analise de stats e ou metricas de jogadores FM" },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "FM Analise Jogadores" },
+      { property: "og:description", content: "Analise de stats e ou metricas de jogadores FM" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "FM Analise Jogadores" },
+      { name: "twitter:description", content: "Analise de stats e ou metricas de jogadores FM" },
+      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/4788dbbd-4c66-48c8-a675-795733c22806" },
+      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/4788dbbd-4c66-48c8-a675-795733c22806" },
     ],
     links: [
       {
