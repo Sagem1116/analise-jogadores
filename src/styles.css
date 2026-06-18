@@ -301,15 +301,15 @@
 @utility shimmer {
   position: relative;
   overflow: hidden;
-}
-@utility shimmer::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, oklch(0.85 0.3 300 / 0.25), transparent);
-  transform: translateX(-100%);
-  animation: shimmer-sweep 2.2s ease-in-out infinite;
-  pointer-events: none;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, oklch(0.85 0.3 300 / 0.25), transparent);
+    transform: translateX(-100%);
+    animation: shimmer-sweep 2.2s ease-in-out infinite;
+    pointer-events: none;
+  }
 }
 
 /* ---------- Table evolution ---------- */
