@@ -14,7 +14,28 @@ export const Route = createFileRoute("/stats/table")({
 
 // Columns that should NEVER show as percentile cards (always raw values)
 const RAW_ONLY = new Set(["UID", "Age", "Wage", "Transfer Value", "Starts", "Minutes Played", "Mins", "Min"]);
+// Columns whose values are monetary strings — filtered with min/max numeric inputs
+const MONEY_COLS = new Set(["Wage", "Transfer Value"]);
 const PER_PAGE = 15;
+
+// Parse monetary strings like "3,355,000 €", "1M", "6.8M", "1M - 6.8M", "850K", "$1,200,000".
+// Returns [min, max] (equal when single value). null if no number found.
+function parseMoney(raw: unknown): [number, number] | null {
+  if (raw == null || raw === "") return null;
+  const s = String(raw).replace(/\u00A0/g, " ");
+  const re = /(-?\d[\d.,]*)\s*([kKmMbB])?/g;
+  const nums: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    const numStr = m[1].replace(/,/g, "");
+    const n = parseFloat(numStr);
+    if (Number.isNaN(n)) continue;
+    const mult = m[2] ? ({ k: 1e3, m: 1e6, b: 1e9 } as Record<string, number>)[m[2].toLowerCase()] : 1;
+    nums.push(n * mult);
+  }
+  if (!nums.length) return null;
+  return [Math.min(...nums), Math.max(...nums)];
+}
 
 function colorForPct(pct: number): string {
   if (pct >= 70) return "border-success/60 bg-success/10 text-success";
@@ -108,17 +129,30 @@ function StatsTable() {
       let ok = true;
       for (const [col, f] of entries) {
         const isRoleCol = selectedRoles.includes(col);
+        const isMoney = MONEY_COLS.has(col);
         const rawVal = isRoleCol ? (roleScores.get(i)?.[col] ?? 0) : p[col];
         if (f.text && f.text.trim()) {
           if (!String(rawVal ?? "").toLowerCase().includes(f.text.toLowerCase())) { ok = false; break; }
         }
         if (f.min !== undefined && f.min !== "") {
-          const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
-          if (Number.isNaN(n) || n < parseFloat(f.min)) { ok = false; break; }
+          const minF = parseFloat(f.min);
+          if (isMoney) {
+            const rng = parseMoney(rawVal);
+            if (!rng || rng[1] < minF) { ok = false; break; }
+          } else {
+            const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
+            if (Number.isNaN(n) || n < minF) { ok = false; break; }
+          }
         }
         if (f.max !== undefined && f.max !== "") {
-          const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
-          if (Number.isNaN(n) || n > parseFloat(f.max)) { ok = false; break; }
+          const maxF = parseFloat(f.max);
+          if (isMoney) {
+            const rng = parseMoney(rawVal);
+            if (!rng || rng[0] > maxF) { ok = false; break; }
+          } else {
+            const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
+            if (Number.isNaN(n) || n > maxF) { ok = false; break; }
+          }
         }
       }
       if (ok) out.push({ p, i });
@@ -184,15 +218,16 @@ function StatsTable() {
   );
 
   const renderFilterCell = (c: string, sticky = false) => {
-    const isNum = numericCols.has(c);
+    const isNum = numericCols.has(c) || MONEY_COLS.has(c);
+    const isMoney = MONEY_COLS.has(c);
     const listId = `dl-${c.replace(/\s+/g, "-")}`;
     return (
       <th key={c} className={`px-2 py-1.5 border-r border-border/40 ${sticky ? "sticky left-0 z-30 bg-[oklch(0.17_0.03_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : "bg-[oklch(0.17_0.03_285)]"}`}>
         {isNum ? (
           <div className="flex gap-1">
-            <input type="number" placeholder="Min" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
+            <input type="number" placeholder={isMoney ? "Min €" : "Min"} className={`${isMoney ? "w-20" : "w-14"} rounded border border-border/60 bg-input px-1.5 py-1 text-xs`}
               value={colFilters[c]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], min: e.target.value } })} />
-            <input type="number" placeholder="Max" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
+            <input type="number" placeholder={isMoney ? "Max €" : "Max"} className={`${isMoney ? "w-20" : "w-14"} rounded border border-border/60 bg-input px-1.5 py-1 text-xs`}
               value={colFilters[c]?.max ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], max: e.target.value } })} />
           </div>
         ) : (
