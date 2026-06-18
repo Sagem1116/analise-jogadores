@@ -6,7 +6,7 @@ import Papa from "papaparse";
 import { setPlayers, type PlayerRow } from "@/lib/stats-store";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/stats")({
+export const Route = createFileRoute("/stats/")({
   head: () => ({ meta: [{ title: "Stats Upload | FMDataLab" }] }),
   component: StatsUpload,
 });
