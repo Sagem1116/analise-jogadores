@@ -107,15 +107,17 @@ function StatsTable() {
       if (q && !String(p.Name ?? "").toLowerCase().includes(q)) continue;
       let ok = true;
       for (const [col, f] of entries) {
+        const isRoleCol = selectedRoles.includes(col);
+        const rawVal = isRoleCol ? (roleScores.get(i)?.[col] ?? 0) : p[col];
         if (f.text && f.text.trim()) {
-          if (!String(p[col] ?? "").toLowerCase().includes(f.text.toLowerCase())) { ok = false; break; }
+          if (!String(rawVal ?? "").toLowerCase().includes(f.text.toLowerCase())) { ok = false; break; }
         }
         if (f.min !== undefined && f.min !== "") {
-          const v = p[col]; const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+          const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
           if (Number.isNaN(n) || n < parseFloat(f.min)) { ok = false; break; }
         }
         if (f.max !== undefined && f.max !== "") {
-          const v = p[col]; const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+          const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
           if (Number.isNaN(n) || n > parseFloat(f.max)) { ok = false; break; }
         }
       }
