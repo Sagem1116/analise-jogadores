@@ -25,7 +25,10 @@ function WeightsPage() {
   const availableStats = allStats.filter((s) => !usedStats.includes(s) && s.toLowerCase().includes(statQuery.toLowerCase()));
 
   function update(stat: string, patch: Partial<{ weight: number; invert: boolean }>) {
-    setWeights((w) => ({ ...w, [activeRole]: { ...w[activeRole], [stat]: { weight: 50, invert: false, ...w[activeRole]?.[stat], ...patch } } }));
+    setWeights((w) => {
+      const prev = w[activeRole]?.[stat] ?? { weight: 50, invert: false };
+      return { ...w, [activeRole]: { ...w[activeRole], [stat]: { ...prev, ...patch } } };
+    });
   }
   function remove(stat: string) {
     setWeights((w) => {
