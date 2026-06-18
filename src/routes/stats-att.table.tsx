@@ -419,10 +419,14 @@ function SATable() {
           </div>
         </div>
 
-        {join.warning && (
-          <div className="mb-3 flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
-            <AlertTriangle className="h-4 w-4" /> {join.warning}
-          </div>
+        {(join.warning || join.unmatched.length > 0) && (
+          <JoinWarning
+            warning={join.warning}
+            strategy={join.strategy}
+            unmatched={join.unmatched}
+            duplicates={join.duplicates}
+            totalAtt={players.length}
+          />
         )}
 
         {roleSelectOpen && (
