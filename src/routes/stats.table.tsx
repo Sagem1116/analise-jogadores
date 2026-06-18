@@ -48,24 +48,37 @@ function formatNum(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
+const VIEW_KEY = "fmdatalab_view_stats";
+function loadView() {
+  if (typeof localStorage === "undefined") return { hidden: [] as string[], colFilters: {} as Record<string, { min?: string; max?: string; text?: string }>, sortBy: null as { col: string; dir: "asc" | "desc" } | null };
+  try { return JSON.parse(localStorage.getItem(VIEW_KEY) || "null") ?? { hidden: [], colFilters: {}, sortBy: null }; }
+  catch { return { hidden: [], colFilters: {}, sortBy: null }; }
+}
+
 function StatsTable() {
   const players = usePlayers();
+  const initView = loadView();
   const [search, setSearch] = useState("");
   const [showPercentiles, setShowPercentiles] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
   const [viewOpen, setViewOpen] = useState(false);
   const [roleSelectOpen, setRoleSelectOpen] = useState(false);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
-  const [sortBy, setSortBy] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
+  const [sortBy, setSortBy] = useState<{ col: string; dir: "asc" | "desc" } | null>(initView.sortBy);
   const [page, setPage] = useState(1);
-  const [colFilters, setColFilters] = useState<Record<string, { min?: string; max?: string; text?: string }>>({});
-  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const [colFilters, setColFilters] = useState<Record<string, { min?: string; max?: string; text?: string }>>(initView.colFilters || {});
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set(initView.hidden || []));
   const [weights, setWeights] = useState<AllRoleWeights>(() => loadWeightsSync());
+
+  useEffect(() => {
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ hidden: [...hidden], colFilters, sortBy })); } catch {}
+  }, [hidden, colFilters, sortBy]);
 
   useEffect(() => {
     fetchWeightsFromDB().then(setWeights).catch(() => {});
     return subscribeWeights(() => setWeights(loadWeightsSync()));
   }, []);
+
 
   const allColumns = useMemo(() => (players[0] ? Object.keys(players[0]) : []), [players]);
   const numericCols = useMemo(() => new Set(allColumns.filter((c) => isNumericColumn(players, c))), [allColumns, players]);

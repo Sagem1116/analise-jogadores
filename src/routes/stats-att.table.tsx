@@ -1,18 +1,20 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AppHeader } from "@/components/AppHeader";
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Download, Eye, Filter, Percent, Settings2, Search, ChevronUp, ChevronDown } from "lucide-react";
+import { Copy, Download, Eye, Filter, Percent, Settings2, Search, ChevronUp, ChevronDown, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { useSAData, isNumericColumn, computePercentiles, computeNormalized } from "@/lib/stats-att-store";
 import { ALL_ROLES, loadWeightsSync, fetchWeightsFromDB, subscribeWeights, type AllRoleWeights } from "@/lib/roles";
 import { loadAttWeightsSync, fetchAttWeightsFromDB, subscribeAttWeights, type AllAttWeights } from "@/lib/att-roles";
+import { joinPlayers, scoreToTone } from "@/lib/player-join";
 
 export const Route = createFileRoute("/stats-att/table")({
   head: () => ({ meta: [{ title: "Stats+Att Table | FMDataLab" }] }),
   component: SATable,
 });
 
+const STATS_PREFIX = "Stats: ";
 const RAW_ONLY = new Set([
   "IDU", "Nome", "Posição", "Posição Sec.", "Idade", "Altura", "Peso", "Inf",
   "Clube", "Divisão", "Nac", "2ª Nac", "Internacionalizações", "Golos",
@@ -20,8 +22,9 @@ const RAW_ONLY = new Set([
   "Pé Esquerdo", "Pé Direito", "Prós", "Contras",
   "UID", "Name", "Age", "Wage", "Transfer Value", "Starts", "Minutes Played",
 ]);
-const MONEY_COLS = new Set(["Salário", "Valor Estimado", "Wage", "Transfer Value"]);
+const MONEY_COLS = new Set(["Salário", "Valor Estimado", "Wage", "Transfer Value", "Stats: Wage", "Stats: Transfer Value"]);
 const PER_PAGE = 15;
+const VIEW_KEY = "fmdatalab_view_sa";
 
 function parseMoney(raw: unknown): [number, number] | null {
   if (raw == null || raw === "") return null;
@@ -38,33 +41,44 @@ function parseMoney(raw: unknown): [number, number] | null {
   return [Math.min(...nums), Math.max(...nums)];
 }
 
-function colorForPct(pct: number): string {
-  if (pct >= 70) return "border-success/60 bg-success/10 text-success";
-  if (pct >= 40) return "border-warning/60 bg-warning/10 text-warning";
-  return "border-danger/60 bg-danger/10 text-danger";
-}
-
 function formatNum(n: number): string {
   if (Math.abs(n) >= 1000) return n.toLocaleString();
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
+type ViewState = {
+  hidden: string[];
+  colFilters: Record<string, { min?: string; max?: string; text?: string }>;
+  sortBy: { col: string; dir: "asc" | "desc" } | null;
+};
+function loadView(): ViewState {
+  if (typeof localStorage === "undefined") return { hidden: [], colFilters: {}, sortBy: null };
+  try { return JSON.parse(localStorage.getItem(VIEW_KEY) || "null") ?? { hidden: [], colFilters: {}, sortBy: null }; }
+  catch { return { hidden: [], colFilters: {}, sortBy: null }; }
+}
+
 function SATable() {
   const { stats, att } = useSAData();
-  // Use Att as base table (more attribute info per player)
+  const navigate = useNavigate();
   const players = att;
+  const initView = loadView();
   const [search, setSearch] = useState("");
   const [showPercentiles, setShowPercentiles] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
   const [viewOpen, setViewOpen] = useState(false);
   const [roleSelectOpen, setRoleSelectOpen] = useState(false);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
-  const [sortBy, setSortBy] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
+  const [sortBy, setSortBy] = useState<ViewState["sortBy"]>(initView.sortBy);
   const [page, setPage] = useState(1);
-  const [colFilters, setColFilters] = useState<Record<string, { min?: string; max?: string; text?: string }>>({});
-  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const [colFilters, setColFilters] = useState<ViewState["colFilters"]>(initView.colFilters || {});
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set(initView.hidden || []));
   const [sWeights, setSWeights] = useState<AllRoleWeights>(() => loadWeightsSync());
   const [aWeights, setAWeights] = useState<AllAttWeights>(() => loadAttWeightsSync());
+
+  // Persist view prefs
+  useEffect(() => {
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ hidden: [...hidden], colFilters, sortBy })); } catch {}
+  }, [hidden, colFilters, sortBy]);
 
   useEffect(() => {
     fetchWeightsFromDB().then(setSWeights).catch(() => {});
@@ -74,30 +88,35 @@ function SATable() {
     return () => { u1(); u2(); };
   }, []);
 
-  const allColumns = useMemo(() => (players[0] ? Object.keys(players[0]) : []), [players]);
-  const nameCol = useMemo(() => allColumns.find((c) => c === "Nome" || c === "Name") ?? allColumns[0] ?? "", [allColumns]);
-  const numericCols = useMemo(() => new Set(allColumns.filter((c) => isNumericColumn(players, c))), [allColumns, players]);
-  const attPercentiles = useMemo(() => computePercentiles(players, [...numericCols]), [players, numericCols]);
-  const attNormalized = useMemo(() => computeNormalized(players, [...numericCols]), [players, numericCols]);
+  // Join players (UID first, fallback name+club). Warn user once.
+  const join = useMemo(() => joinPlayers(att, stats), [att, stats]);
+  useEffect(() => {
+    if (!att.length || !stats.length) return;
+    if (join.warning) toast.warning(join.warning, { duration: 6000, id: "sa-join-warn" });
+    else if (join.strategy === "id") toast.success(`Jogadores unidos por ${join.idCol}`, { duration: 3000, id: "sa-join-ok" });
+  }, [join, att.length, stats.length]);
 
-  // Stats-side numeric cols + percentiles + index by name
+  const attCols = useMemo(() => (players[0] ? Object.keys(players[0]) : []), [players]);
+  const nameCol = useMemo(() => attCols.find((c) => c === "Nome" || c === "Name") ?? attCols[0] ?? "", [attCols]);
+  const attNumeric = useMemo(() => new Set(attCols.filter((c) => isNumericColumn(players, c))), [attCols, players]);
+  const attPercentiles = useMemo(() => computePercentiles(players, [...attNumeric]), [players, attNumeric]);
+  const attNormalized = useMemo(() => computeNormalized(players, [...attNumeric]), [players, attNumeric]);
+
+  // Stats columns (raw names) + numeric + percentiles (shared)
   const statsCols = useMemo(() => (stats[0] ? Object.keys(stats[0]) : []), [stats]);
   const statsNumeric = useMemo(() => new Set(statsCols.filter((c) => isNumericColumn(stats, c))), [statsCols, stats]);
   const statsPercentiles = useMemo(() => computePercentiles(stats, [...statsNumeric]), [stats, statsNumeric]);
-  const statsNameCol = useMemo(() => statsCols.find((c) => c === "Name" || c === "Nome") ?? statsCols[0] ?? "", [statsCols]);
-  const statsByName = useMemo(() => {
-    const m = new Map<string, any>();
-    for (const r of stats) {
-      const n = String(r[statsNameCol] ?? "").trim().toLowerCase();
-      if (n) m.set(n, r);
-    }
-    return m;
-  }, [stats, statsNameCol]);
+
+  // Prefixed stats columns shown in the table
+  const statsColsPrefixed = useMemo(() => statsCols.map((c) => `${STATS_PREFIX}${c}`), [statsCols]);
+
+  // All columns union for visibility toggle
+  const allColumns = useMemo(() => [...attCols, ...statsColsPrefixed], [attCols, statsColsPrefixed]);
 
   const filterSuggestions = useMemo(() => {
     const map = new Map<string, string[]>();
-    for (const c of allColumns) {
-      if (numericCols.has(c)) continue;
+    for (const c of attCols) {
+      if (attNumeric.has(c)) continue;
       const set = new Set<string>();
       for (let i = 0; i < players.length && set.size < 200; i++) {
         const v = players[i][c]; if (v != null && v !== "") set.add(String(v));
@@ -105,35 +124,34 @@ function SATable() {
       map.set(c, [...set].sort());
     }
     return map;
-  }, [players, allColumns, numericCols]);
+  }, [players, attCols, attNumeric]);
 
   const visibleCols = useMemo(() => allColumns.filter((c) => !hidden.has(c)), [allColumns, hidden]);
-  const nameIdx = visibleCols.indexOf(nameCol);
-  const colsBeforeRoles = nameIdx >= 0 ? visibleCols.slice(0, nameIdx + 1) : [];
-  const colsAfterRoles = nameIdx >= 0 ? visibleCols.slice(nameIdx + 1) : visibleCols;
+  const visibleAtt = visibleCols.filter((c) => !c.startsWith(STATS_PREFIX));
+  const visibleStats = visibleCols.filter((c) => c.startsWith(STATS_PREFIX));
+  const nameIdx = visibleAtt.indexOf(nameCol);
+  const attBefore = nameIdx >= 0 ? visibleAtt.slice(0, nameIdx + 1) : [];
+  const attAfter = nameIdx >= 0 ? visibleAtt.slice(nameIdx + 1) : visibleAtt;
 
-  // Build role columns (3 per role)
   const roleColumns = useMemo(() => {
     const out: { key: string; label: string; kind: "att" | "stats" | "total"; role: string }[] = [];
     for (const r of selectedRoles) {
-      out.push({ key: `__att__${r}`, label: `Score Att (${r})`, kind: "att", role: r });
-      out.push({ key: `__stats__${r}`, label: `Score Stats (${r})`, kind: "stats", role: r });
-      out.push({ key: `__total__${r}`, label: `Score Total (${r})`, kind: "total", role: r });
+      out.push({ key: `__att__${r}`, label: `Att (${r})`, kind: "att", role: r });
+      out.push({ key: `__stats__${r}`, label: `Stats (${r})`, kind: "stats", role: r });
+      out.push({ key: `__total__${r}`, label: `Total (${r})`, kind: "total", role: r });
     }
     return out;
   }, [selectedRoles]);
 
-  // Compute scores per row
+  // Compute scores per row using join
   const roleScores = useMemo(() => {
     const result = new Map<number, Record<string, number>>();
     if (!selectedRoles.length || !players.length) return result;
     for (let idx = 0; idx < players.length; idx++) {
       const p = players[idx];
-      const name = String(p[nameCol] ?? "").trim().toLowerCase();
-      const statsRow = statsByName.get(name);
+      const statsRow = join.attToStats.get(idx);
       const scores: Record<string, number> = {};
       for (const role of selectedRoles) {
-        // Att score (60% norm + 40% pct)
         const aw = aWeights[role] || {};
         let aSum = 0, aTot = 0;
         for (const stat in aw) {
@@ -147,8 +165,6 @@ function SATable() {
           aSum += (norm * 0.6 + pct * 0.4) * info.weight; aTot += info.weight;
         }
         const attScore = aTot ? Math.round(aSum / aTot) : 0;
-
-        // Stats score (percentile * weight)
         const sw = sWeights[role] || {};
         let sSum = 0, sTot = 0;
         if (statsRow) {
@@ -163,9 +179,7 @@ function SATable() {
           }
         }
         const statsScore = sTot ? Math.round(sSum / sTot) : 0;
-
         const total = Math.round(Math.sqrt(attScore * statsScore));
-
         scores[`__att__${role}`] = attScore;
         scores[`__stats__${role}`] = statsScore;
         scores[`__total__${role}`] = total;
@@ -173,9 +187,19 @@ function SATable() {
       result.set(idx, scores);
     }
     return result;
-  }, [players, selectedRoles, aWeights, sWeights, attPercentiles, attNormalized, statsPercentiles, statsByName, nameCol]);
+  }, [players, selectedRoles, aWeights, sWeights, attPercentiles, attNormalized, statsPercentiles, join]);
 
   const roleKeys = useMemo(() => new Set(roleColumns.map((c) => c.key)), [roleColumns]);
+
+  // Get cell value for any column (att raw, stats prefixed, role-score)
+  function cellValue(rowIdx: number, p: any, col: string): any {
+    if (roleKeys.has(col)) return roleScores.get(rowIdx)?.[col] ?? 0;
+    if (col.startsWith(STATS_PREFIX)) {
+      const sr = join.attToStats.get(rowIdx);
+      return sr ? sr[col.slice(STATS_PREFIX.length)] : null;
+    }
+    return p[col];
+  }
 
   const filtered = useMemo(() => {
     if (!players.length) return [] as { p: any; i: number }[];
@@ -189,9 +213,8 @@ function SATable() {
       if (q && !String(p[nameCol] ?? "").toLowerCase().includes(q)) continue;
       let ok = true;
       for (const [col, f] of entries) {
-        const isRoleCol = roleKeys.has(col);
         const isMoney = MONEY_COLS.has(col);
-        const rawVal = isRoleCol ? (roleScores.get(i)?.[col] ?? 0) : p[col];
+        const rawVal = cellValue(i, p, col);
         if (f.text && f.text.trim()) {
           if (!String(rawVal ?? "").toLowerCase().includes(f.text.toLowerCase())) { ok = false; break; }
         }
@@ -210,11 +233,10 @@ function SATable() {
     }
     if (sortBy) {
       const { col, dir } = sortBy;
-      const isRole = roleKeys.has(col);
       const sign = dir === "asc" ? 1 : -1;
       out.sort((a, b) => {
-        const av = isRole ? (roleScores.get(a.i)?.[col] ?? 0) : a.p[col];
-        const bv = isRole ? (roleScores.get(b.i)?.[col] ?? 0) : b.p[col];
+        const av = cellValue(a.i, a.p, col);
+        const bv = cellValue(b.i, b.p, col);
         const an = typeof av === "number" ? av : parseFloat(String(av ?? ""));
         const bn = typeof bv === "number" ? bv : parseFloat(String(bv ?? ""));
         if (!Number.isNaN(an) && !Number.isNaN(bn)) return (an - bn) * sign;
@@ -222,7 +244,8 @@ function SATable() {
       });
     }
     return out;
-  }, [players, search, colFilters, sortBy, roleScores, roleKeys, nameCol]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [players, search, colFilters, sortBy, roleScores, roleKeys, nameCol, join]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const pageRows = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -231,9 +254,10 @@ function SATable() {
   function exportExcel() {
     const data = filtered.map(({ p, i }) => {
       const row: Record<string, any> = {};
-      for (const c of colsBeforeRoles) row[c] = p[c];
+      for (const c of attBefore) row[c] = p[c];
       for (const rc of roleColumns) row[rc.label] = roleScores.get(i)?.[rc.key] ?? 0;
-      for (const c of colsAfterRoles) row[c] = p[c];
+      for (const c of attAfter) row[c] = p[c];
+      for (const c of visibleStats) row[c] = cellValue(i, p, c);
       return row;
     });
     const ws = XLSX.utils.json_to_sheet(data);
@@ -244,6 +268,11 @@ function SATable() {
 
   function toggleSort(col: string) {
     setSortBy((s) => s?.col === col ? (s.dir === "desc" ? { col, dir: "asc" } : null) : { col, dir: "desc" });
+  }
+
+  function goToPlayer(p: any) {
+    const k = join.keyFor(p);
+    navigate({ to: "/stats-att/player/$key", params: { key: encodeURIComponent(k) } });
   }
 
   if (!players.length || !stats.length) {
@@ -258,22 +287,26 @@ function SATable() {
     );
   }
 
-  const renderHeaderCell = (c: string, sticky = false) => (
-    <th key={c} className={`px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap border-r border-border/40 ${sticky ? "sticky left-0 z-30 bg-gradient-to-r from-[oklch(0.22_0.05_290)] to-[oklch(0.2_0.04_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : "bg-[oklch(0.2_0.04_285)]"}`}>
-      <button onClick={() => toggleSort(c)} className="inline-flex items-center gap-1 hover:text-primary">
-        {c}
-        {sortBy?.col === c && (sortBy.dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
-      </button>
-    </th>
-  );
+  const renderHeaderCell = (c: string, sticky = false) => {
+    const isStats = c.startsWith(STATS_PREFIX);
+    return (
+      <th key={c} className={`px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap border-r border-border/40 ${sticky ? "sticky left-0 z-30 bg-gradient-to-r from-[oklch(0.22_0.05_290)] to-[oklch(0.2_0.04_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : isStats ? "bg-[oklch(0.2_0.06_200)]" : "bg-[oklch(0.2_0.04_285)]"}`}>
+        <button onClick={() => toggleSort(c)} className="inline-flex items-center gap-1 hover:text-primary">
+          {c}
+          {sortBy?.col === c && (sortBy.dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+        </button>
+      </th>
+    );
+  };
 
   const renderFilterCell = (c: string, sticky = false) => {
-    const isNum = numericCols.has(c) || MONEY_COLS.has(c);
-    const isMoney = MONEY_COLS.has(c);
-    const listId = `dl-${c.replace(/\s+/g, "-")}`;
+    const baseCol = c.startsWith(STATS_PREFIX) ? c.slice(STATS_PREFIX.length) : c;
+    const isNum = c.startsWith(STATS_PREFIX) ? statsNumeric.has(baseCol) : attNumeric.has(c);
+    const isMoney = MONEY_COLS.has(c) || MONEY_COLS.has(baseCol);
+    const listId = `dl-${c.replace(/\s+|:/g, "-")}`;
     return (
       <th key={c} className={`px-2 py-1.5 border-r border-border/40 ${sticky ? "sticky left-0 z-30 bg-[oklch(0.17_0.03_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : "bg-[oklch(0.17_0.03_285)]"}`}>
-        {isNum ? (
+        {isNum || isMoney ? (
           <div className="flex gap-1">
             <input type="number" placeholder={isMoney ? "Min €" : "Min"} className={`${isMoney ? "w-20" : "w-14"} rounded border border-border/60 bg-input px-1.5 py-1 text-xs`}
               value={colFilters[c]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], min: e.target.value } })} />
@@ -291,30 +324,36 @@ function SATable() {
     );
   };
 
-  const renderBodyCell = (c: string, v: any, sticky = false) => {
-    const isNum = numericCols.has(c);
+  const renderBodyCell = (i: number, p: any, c: string, sticky = false) => {
+    const isStats = c.startsWith(STATS_PREFIX);
+    const baseCol = isStats ? c.slice(STATS_PREFIX.length) : c;
+    const v = cellValue(i, p, c);
+    const isNum = isStats ? statsNumeric.has(baseCol) : attNumeric.has(c);
     const num = typeof v === "number" ? v : parseFloat(String(v ?? ""));
-    const isRaw = RAW_ONLY.has(c);
-    const pct = isNum && !isRaw && !Number.isNaN(num) ? attPercentiles.get(c)?.get(num) ?? 50 : null;
+    const isRaw = RAW_ONLY.has(baseCol);
+    const pctMap = isStats ? statsPercentiles.get(baseCol) : attPercentiles.get(c);
+    const pct = isNum && !isRaw && !Number.isNaN(num) ? pctMap?.get(num) ?? 50 : null;
     const display = showPercentiles && pct !== null ? `${pct}` : (isNum && !Number.isNaN(num) ? formatNum(num) : (v ?? ""));
     return (
       <td key={c} className={`px-3 py-2 whitespace-nowrap border-r border-border/30 ${sticky ? "sticky left-0 z-20 bg-[oklch(0.18_0.03_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)] font-medium" : ""}`}>
         {c === nameCol ? (
           <span className="inline-flex items-center gap-2">
-            <span className="font-semibold text-foreground">{v}</span>
-            <button onClick={() => { navigator.clipboard.writeText(String(v)); toast.success("Copiado"); }}
+            <button onClick={(e) => { e.stopPropagation(); goToPlayer(p); }} className="font-semibold text-foreground hover:text-primary hover:underline">{String(v ?? "")}</button>
+            <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(String(v)); toast.success("Copiado"); }}
               className="opacity-60 hover:opacity-100 hover:text-primary transition" title="Copiar nome">
               <Copy className="h-3.5 w-3.5" />
             </button>
           </span>
         ) : isNum && !isRaw && pct !== null ? (
-          <span className={`inline-block min-w-[3rem] rounded-full border px-2 py-0.5 text-center text-xs font-bold ${colorForPct(pct)}`}>{display}</span>
+          <span className={`inline-block min-w-[3rem] rounded-full border px-2 py-0.5 text-center text-xs font-bold ${scoreToTone(pct)}`}>{display}</span>
         ) : (
           <span className="text-sm text-foreground/90">{String(display)}</span>
         )}
       </td>
     );
   };
+
+  const matchedCount = join.attToStats.size;
 
   return (
     <div className="min-h-screen">
@@ -323,7 +362,9 @@ function SATable() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Stats + Att</h1>
-            <p className="text-sm text-muted-foreground">{players.length.toLocaleString()} att · {stats.length.toLocaleString()} stats</p>
+            <p className="text-sm text-muted-foreground">
+              {players.length.toLocaleString()} att · {stats.length.toLocaleString()} stats · {matchedCount.toLocaleString()} unidos ({join.strategy === "id" ? `por ${join.idCol}` : "Nome+Clube"})
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link to="/stats-att" className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold btn-glow">
@@ -349,17 +390,27 @@ function SATable() {
                 <Eye className="h-4 w-4" /> View
               </button>
               {viewOpen && (
-                <div className="absolute right-0 top-full z-50 mt-2 max-h-[70vh] w-72 overflow-y-auto rounded-md border border-border bg-popover p-3 shadow-2xl">
+                <div className="absolute right-0 top-full z-50 mt-2 max-h-[70vh] w-80 overflow-y-auto rounded-md border border-border bg-popover p-3 shadow-2xl">
                   <div className="mb-2 flex gap-2 text-xs">
                     <button className="flex-1 rounded bg-secondary px-2 py-1" onClick={() => setHidden(new Set())}>View All</button>
                     <button className="flex-1 rounded bg-secondary px-2 py-1" onClick={() => setHidden(new Set(allColumns))}>Hide All</button>
                   </div>
-                  {allColumns.map((c) => (
-                    <label key={c} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-secondary">
+                  <div className="text-xs font-semibold text-muted-foreground mt-2 mb-1">Atributos</div>
+                  {attCols.map((c) => (
+                    <label key={c} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-secondary">
                       <input type="checkbox" checked={!hidden.has(c)} onChange={(e) => {
                         const n = new Set(hidden); if (e.target.checked) n.delete(c); else n.add(c); setHidden(n);
                       }} />
                       <span className="truncate">{c}</span>
+                    </label>
+                  ))}
+                  <div className="text-xs font-semibold text-muted-foreground mt-3 mb-1">Stats</div>
+                  {statsColsPrefixed.map((c) => (
+                    <label key={c} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-secondary">
+                      <input type="checkbox" checked={!hidden.has(c)} onChange={(e) => {
+                        const n = new Set(hidden); if (e.target.checked) n.delete(c); else n.add(c); setHidden(n);
+                      }} />
+                      <span className="truncate">{c.slice(STATS_PREFIX.length)}</span>
                     </label>
                   ))}
                 </div>
@@ -367,6 +418,12 @@ function SATable() {
             </div>
           </div>
         </div>
+
+        {join.warning && (
+          <div className="mb-3 flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+            <AlertTriangle className="h-4 w-4" /> {join.warning}
+          </div>
+        )}
 
         {roleSelectOpen && (
           <RoleSelector selected={selectedRoles} onChange={setSelectedRoles} onClose={() => setRoleSelectOpen(false)} />
@@ -384,7 +441,7 @@ function SATable() {
           <table className="w-full text-sm border-separate border-spacing-0">
             <thead className="sticky top-0 z-20">
               <tr>
-                {colsBeforeRoles.map((c) => renderHeaderCell(c, c === nameCol))}
+                {attBefore.map((c) => renderHeaderCell(c, c === nameCol))}
                 {roleColumns.map((rc) => (
                   <th key={rc.key} className={`px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap border-r border-border/40 text-foreground ${
                     rc.kind === "total" ? "bg-gradient-to-b from-[oklch(0.5_0.3_320)] to-[oklch(0.4_0.28_320)]"
@@ -397,11 +454,12 @@ function SATable() {
                     </button>
                   </th>
                 ))}
-                {colsAfterRoles.map((c) => renderHeaderCell(c))}
+                {attAfter.map((c) => renderHeaderCell(c))}
+                {visibleStats.map((c) => renderHeaderCell(c))}
               </tr>
               {showFilters && (
                 <tr>
-                  {colsBeforeRoles.map((c) => renderFilterCell(c, c === nameCol))}
+                  {attBefore.map((c) => renderFilterCell(c, c === nameCol))}
                   {roleColumns.map((rc) => (
                     <th key={rc.key} className="px-2 py-1.5 bg-[oklch(0.17_0.03_285)] border-r border-border/40">
                       <div className="flex gap-1">
@@ -412,23 +470,25 @@ function SATable() {
                       </div>
                     </th>
                   ))}
-                  {colsAfterRoles.map((c) => renderFilterCell(c))}
+                  {attAfter.map((c) => renderFilterCell(c))}
+                  {visibleStats.map((c) => renderFilterCell(c))}
                 </tr>
               )}
             </thead>
             <tbody>
               {pageRows.map(({ p, i }, rowIdx) => (
-                <tr key={i} className={`${rowIdx % 2 === 0 ? "bg-[oklch(0.18_0.03_285)]" : "bg-[oklch(0.16_0.03_285)]"} hover:bg-primary/10 transition-colors`}>
-                  {colsBeforeRoles.map((c) => renderBodyCell(c, p[c], c === nameCol))}
+                <tr key={i} onClick={() => goToPlayer(p)} className={`cursor-pointer ${rowIdx % 2 === 0 ? "bg-[oklch(0.18_0.03_285)]" : "bg-[oklch(0.16_0.03_285)]"} hover:bg-primary/10 transition-colors`}>
+                  {attBefore.map((c) => renderBodyCell(i, p, c, c === nameCol))}
                   {roleColumns.map((rc) => {
                     const s = roleScores.get(i)?.[rc.key] ?? 0;
                     return (
                       <td key={rc.key} className="px-3 py-2 border-r border-border/30">
-                        <span className={`inline-block min-w-[3rem] rounded-full border px-2 py-0.5 text-center text-xs font-bold ${colorForPct(s)}`}>{s}</span>
+                        <span className={`inline-block min-w-[3rem] rounded-full border px-2 py-0.5 text-center text-xs font-bold ${scoreToTone(s)}`}>{s}</span>
                       </td>
                     );
                   })}
-                  {colsAfterRoles.map((c) => renderBodyCell(c, p[c]))}
+                  {attAfter.map((c) => renderBodyCell(i, p, c))}
+                  {visibleStats.map((c) => renderBodyCell(i, p, c))}
                 </tr>
               ))}
             </tbody>

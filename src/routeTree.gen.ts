@@ -20,6 +20,7 @@ import { Route as StatsAttWeightsRouteImport } from './routes/stats-att.weights'
 import { Route as StatsAttTableRouteImport } from './routes/stats-att.table'
 import { Route as AttWeightsRouteImport } from './routes/att.weights'
 import { Route as AttTableRouteImport } from './routes/att.table'
+import { Route as StatsAttPlayerKeyRouteImport } from './routes/stats-att.player.$key'
 
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
@@ -76,6 +77,11 @@ const AttTableRoute = AttTableRouteImport.update({
   path: '/att/table',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StatsAttPlayerKeyRoute = StatsAttPlayerKeyRouteImport.update({
+  id: '/stats-att/player/$key',
+  path: '/stats-att/player/$key',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/att/': typeof AttIndexRoute
   '/stats-att/': typeof StatsAttIndexRoute
   '/stats/': typeof StatsIndexRoute
+  '/stats-att/player/$key': typeof StatsAttPlayerKeyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -102,6 +109,7 @@ export interface FileRoutesByTo {
   '/att': typeof AttIndexRoute
   '/stats-att': typeof StatsAttIndexRoute
   '/stats': typeof StatsIndexRoute
+  '/stats-att/player/$key': typeof StatsAttPlayerKeyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/att/': typeof AttIndexRoute
   '/stats-att/': typeof StatsAttIndexRoute
   '/stats/': typeof StatsIndexRoute
+  '/stats-att/player/$key': typeof StatsAttPlayerKeyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/att/'
     | '/stats-att/'
     | '/stats/'
+    | '/stats-att/player/$key'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -144,6 +154,7 @@ export interface FileRouteTypes {
     | '/att'
     | '/stats-att'
     | '/stats'
+    | '/stats-att/player/$key'
   id:
     | '__root__'
     | '/'
@@ -157,6 +168,7 @@ export interface FileRouteTypes {
     | '/att/'
     | '/stats-att/'
     | '/stats/'
+    | '/stats-att/player/$key'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -171,6 +183,7 @@ export interface RootRouteChildren {
   AttIndexRoute: typeof AttIndexRoute
   StatsAttIndexRoute: typeof StatsAttIndexRoute
   StatsIndexRoute: typeof StatsIndexRoute
+  StatsAttPlayerKeyRoute: typeof StatsAttPlayerKeyRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -252,6 +265,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AttTableRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/stats-att/player/$key': {
+      id: '/stats-att/player/$key'
+      path: '/stats-att/player/$key'
+      fullPath: '/stats-att/player/$key'
+      preLoaderRoute: typeof StatsAttPlayerKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -267,6 +287,7 @@ const rootRouteChildren: RootRouteChildren = {
   AttIndexRoute: AttIndexRoute,
   StatsAttIndexRoute: StatsAttIndexRoute,
   StatsIndexRoute: StatsIndexRoute,
+  StatsAttPlayerKeyRoute: StatsAttPlayerKeyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
