@@ -16,13 +16,13 @@ export function findCol(rows: PlayerRow[], candidates: string[]): string | null 
 }
 
 export type JoinResult = {
-  // map: index in `att` rows -> matched stats row (or undefined)
   attToStats: Map<number, PlayerRow>;
-  // playerKey(idx) used by profile route
   keyFor: (row: PlayerRow) => string;
   strategy: "id" | "name-club";
   warning: string | null;
   idCol: string | null;
+  unmatched: { name: string; club: string }[];
+  duplicates: { name: string; club: string; id?: string }[];
 };
 
 export function joinPlayers(att: PlayerRow[], stats: PlayerRow[]): JoinResult {
@@ -35,35 +35,46 @@ export function joinPlayers(att: PlayerRow[], stats: PlayerRow[]): JoinResult {
 
   let warning: string | null = null;
   const attToStats = new Map<number, PlayerRow>();
+  const duplicates: { name: string; club: string; id?: string }[] = [];
+
+  const nameOf = (r: PlayerRow) => String(nameA ? r[nameA] ?? "" : "").trim();
+  const clubOf = (r: PlayerRow) => String(clubA ? r[clubA] ?? "" : "").trim();
 
   // Try ID join
   if (idA && idS) {
-    const seenA = new Set<string>(); let dupA = 0;
-    for (const r of att) {
-      const v = String(r[idA] ?? "").trim(); if (!v) continue;
-      if (seenA.has(v)) dupA++; else seenA.add(v);
+    const seenA = new Map<string, number>(); const dupAList: typeof duplicates = [];
+    for (let i = 0; i < att.length; i++) {
+      const v = String(att[i][idA] ?? "").trim(); if (!v) continue;
+      if (seenA.has(v)) dupAList.push({ name: nameOf(att[i]), club: clubOf(att[i]), id: v });
+      else seenA.set(v, i);
     }
-    const sMap = new Map<string, PlayerRow>(); let dupS = 0;
+    const sMap = new Map<string, PlayerRow>(); const dupSList: typeof duplicates = [];
     for (const r of stats) {
       const v = String(r[idS] ?? "").trim(); if (!v) continue;
-      if (sMap.has(v)) dupS++; else sMap.set(v, r);
+      if (sMap.has(v)) dupSList.push({ name: String(nameS ? r[nameS] ?? "" : "").trim(), club: String(clubS ? r[clubS] ?? "" : "").trim(), id: v });
+      else sMap.set(v, r);
     }
-    if (!dupA && !dupS) {
+    if (!dupAList.length && !dupSList.length) {
+      const unmatched: { name: string; club: string }[] = [];
       for (let i = 0; i < att.length; i++) {
         const v = String(att[i][idA] ?? "").trim();
-        const m = sMap.get(v); if (m) attToStats.set(i, m);
+        const m = sMap.get(v);
+        if (m) attToStats.set(i, m);
+        else unmatched.push({ name: nameOf(att[i]), club: clubOf(att[i]) });
       }
       return {
-        attToStats, strategy: "id", warning: null, idCol: idA,
+        attToStats, strategy: "id", warning: null, idCol: idA, unmatched, duplicates: [],
         keyFor: (row) => `id:${String(row[idA] ?? "").trim()}`,
       };
     }
-    warning = `Coluna ${idA}/${idS} tem duplicados (${dupA + dupS}). A juntar por Nome+Clube.`;
+    duplicates.push(...dupAList, ...dupSList);
+    warning = `Coluna ${idA}/${idS} tem ${duplicates.length} duplicado(s). A juntar por Nome+Clube.`;
   } else {
-    warning = `Sem coluna UID/IDU em ${idA ? "Stats" : idS ? "Att" : "ambos"} ficheiros. A juntar por Nome+Clube.`;
+    warning = `Sem coluna UID/IDU em ${!idA && !idS ? "ambos os ficheiros" : !idA ? "Att" : "Stats"}. A juntar por Nome+Clube.`;
   }
 
   // Fallback: Name + Club
+  const unmatched: { name: string; club: string }[] = [];
   if (nameA && nameS) {
     const sMap = new Map<string, PlayerRow>();
     for (const r of stats) {
@@ -72,13 +83,15 @@ export function joinPlayers(att: PlayerRow[], stats: PlayerRow[]): JoinResult {
     }
     for (let i = 0; i < att.length; i++) {
       const r = att[i];
-      const k = `${String(r[nameA] ?? "").trim().toLowerCase()}|${String(clubA ? r[clubA] ?? "" : "").trim().toLowerCase()}`;
-      const m = sMap.get(k); if (m) attToStats.set(i, m);
+      const k = `${nameOf(r).toLowerCase()}|${clubOf(r).toLowerCase()}`;
+      const m = sMap.get(k);
+      if (m) attToStats.set(i, m);
+      else unmatched.push({ name: nameOf(r), club: clubOf(r) });
     }
   }
   return {
-    attToStats, strategy: "name-club", warning, idCol: null,
-    keyFor: (row) => `nc:${String(nameA ? row[nameA] ?? "" : "").trim()}|${String(clubA ? row[clubA] ?? "" : "").trim()}`,
+    attToStats, strategy: "name-club", warning, idCol: null, unmatched, duplicates,
+    keyFor: (row) => `nc:${nameOf(row)}|${clubOf(row)}`,
   };
 }
 

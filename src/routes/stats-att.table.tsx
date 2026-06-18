@@ -419,10 +419,14 @@ function SATable() {
           </div>
         </div>
 
-        {join.warning && (
-          <div className="mb-3 flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
-            <AlertTriangle className="h-4 w-4" /> {join.warning}
-          </div>
+        {(join.warning || join.unmatched.length > 0) && (
+          <JoinWarning
+            warning={join.warning}
+            strategy={join.strategy}
+            unmatched={join.unmatched}
+            duplicates={join.duplicates}
+            totalAtt={players.length}
+          />
         )}
 
         {roleSelectOpen && (
@@ -531,6 +535,67 @@ function RoleSelector({ selected, onChange, onClose }: { selected: string[]; onC
           </label>
         ))}
       </div>
+    </div>
+  );
+}
+
+function JoinWarning({ warning, strategy, unmatched, duplicates, totalAtt }: {
+  warning: string | null;
+  strategy: "id" | "name-club";
+  unmatched: { name: string; club: string }[];
+  duplicates: { name: string; club: string; id?: string }[];
+  totalAtt: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const tone = strategy === "name-club"
+    ? "border-warning/50 bg-warning/10 text-warning"
+    : "border-primary/40 bg-primary/10 text-primary";
+  const headline = warning
+    ? warning
+    : `${unmatched.length} jogador(es) sem correspondência no ficheiro Stats.`;
+  const hasDetail = unmatched.length > 0 || duplicates.length > 0;
+  return (
+    <div className={`mb-3 rounded-md border px-3 py-2 text-xs ${tone}`}>
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        <span className="flex-1">
+          {headline}
+          {unmatched.length > 0 && (
+            <span className="opacity-90"> · {unmatched.length} sem match ({Math.round((unmatched.length / Math.max(totalAtt, 1)) * 100)}%)</span>
+          )}
+        </span>
+        {hasDetail && (
+          <button onClick={() => setOpen((v) => !v)} className="rounded border border-current/30 px-2 py-0.5 hover:bg-current/10">
+            {open ? "Esconder" : "Ver detalhes"}
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-2 grid gap-3 md:grid-cols-2">
+          {unmatched.length > 0 && (
+            <div className="rounded border border-current/20 bg-background/40 p-2">
+              <div className="mb-1 font-semibold">Sem match no Stats ({unmatched.length})</div>
+              <ul className="max-h-48 overflow-y-auto space-y-0.5 font-mono text-[11px] text-foreground/80">
+                {unmatched.slice(0, 200).map((u, i) => (
+                  <li key={i}>{u.name}{u.club ? ` — ${u.club}` : ""}</li>
+                ))}
+                {unmatched.length > 200 && <li className="opacity-60">… +{unmatched.length - 200}</li>}
+              </ul>
+            </div>
+          )}
+          {duplicates.length > 0 && (
+            <div className="rounded border border-current/20 bg-background/40 p-2">
+              <div className="mb-1 font-semibold">UID duplicado ({duplicates.length})</div>
+              <ul className="max-h-48 overflow-y-auto space-y-0.5 font-mono text-[11px] text-foreground/80">
+                {duplicates.slice(0, 200).map((d, i) => (
+                  <li key={i}>{d.id ? `[${d.id}] ` : ""}{d.name}{d.club ? ` — ${d.club}` : ""}</li>
+                ))}
+                {duplicates.length > 200 && <li className="opacity-60">… +{duplicates.length - 200}</li>}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

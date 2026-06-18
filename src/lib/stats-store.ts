@@ -46,14 +46,17 @@ export function computePercentiles(rows: PlayerRow[], columns: string[]): Map<st
       const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
       if (!Number.isNaN(n) && Number.isFinite(n)) values.push(n);
     }
-    if (!values.length) continue;
-    const sorted = [...values].sort((a, b) => a - b);
+    const n = values.length;
+    if (!n) continue;
+    values.sort((a, b) => a - b);
     const map = new Map<number, number>();
-    for (const v of values) {
-      // percentile = (rank / n) * 100
-      const idx = sorted.findIndex((x) => x >= v);
-      const pct = ((idx === -1 ? sorted.length : idx) / sorted.length) * 100;
-      map.set(v, Math.round(pct));
+    let i = 0;
+    while (i < n) {
+      let j = i;
+      while (j < n && values[j] === values[i]) j++;
+      const pct = ((i + (j - i) / 2) / n) * 100;
+      map.set(values[i], Math.round(pct));
+      i = j;
     }
     result.set(col, map);
   }
