@@ -6,6 +6,8 @@ const navItems = [
   { to: "/stats", label: "Stats", badge: "UPDATE" },
   { to: "/att", label: "Att" },
   { to: "/stats-att", label: "Stats+Att" },
+  { to: "/metricas-gemini", label: "Métricas Gemini" },
+  { to: "/nuno-stats-att", label: "Nuno Stats+Att" },
 ];
 
 export function AppHeader() {
