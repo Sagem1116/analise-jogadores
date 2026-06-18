@@ -2,11 +2,11 @@
 import { getSAStats, getSAAtt, isNumericColumn } from "@/lib/stats-att-store";
 import { getAttPlayers } from "@/lib/att-store";
 import { getPlayers as getStatsPlayers } from "@/lib/stats-store";
-import { joinPlayers, findCol } from "@/lib/player-join";
+import { joinPlayers } from "@/lib/player-join";
 import type { PlayerRow } from "@/lib/stats-att-store";
 
-const MAX_ROWS = 250;
-const KEY_COLS = ["Nome", "Name", "Clube", "Club", "Idade", "Age", "Posição", "Posicao", "Position", "Pos", "Valor", "Value", "Salário", "Salario", "Wage"];
+const MAX_ROWS = 300;
+const KEY_COLS = ["UID", "IDU", "Nome", "Name", "Clube", "Club", "Idade", "Age", "Posição", "Posicao", "Position", "Pos", "Valor", "Value", "Salário", "Salario", "Wage"];
 
 function pickNumericCols(rows: PlayerRow[]): string[] {
   if (!rows.length) return [];
@@ -26,14 +26,12 @@ function toCSV(rows: PlayerRow[], cols: string[]): string {
   return `${header}\n${body}`;
 }
 
-function summarize(rows: PlayerRow[], label: string): string {
-  if (!rows.length) return `### ${label}\n(sem dados carregados)\n`;
-  const keys = Object.keys(rows[0]);
-  const keyCols = KEY_COLS.filter((k) => keys.includes(k));
-  const numCols = pickNumericCols(rows).filter((c) => !keyCols.includes(c));
-  const cols = [...keyCols, ...numCols];
-  const note = rows.length > MAX_ROWS ? `\n(mostrando ${MAX_ROWS} de ${rows.length} jogadores)` : "";
-  return `### ${label} (${rows.length} jogadores)${note}\n\`\`\`csv\n${toCSV(rows, cols)}\n\`\`\`\n`;
+function classifyCols(rows: PlayerRow[]): { keys: string[]; numeric: string[] } {
+  if (!rows.length) return { keys: [], numeric: [] };
+  const allKeys = Object.keys(rows[0]);
+  const keys = KEY_COLS.filter((k) => allKeys.includes(k));
+  const numeric = pickNumericCols(rows).filter((c) => !keys.includes(c));
+  return { keys, numeric };
 }
 
 export function buildScoutContext(): string {
@@ -44,27 +42,69 @@ export function buildScoutContext(): string {
 
   const sections: string[] = [];
 
+  // Prefer combined Stats+Att view: explicitly merge att + stats with clear prefixes.
   if (sa_att.length && sa_stats.length) {
     const join = joinPlayers(sa_att, sa_stats);
+    const attCls = classifyCols(sa_att);
+    const statsCls = classifyCols(sa_stats);
+
     const merged: PlayerRow[] = sa_att.map((row, i) => {
+      const out: PlayerRow = {};
+      // identifiers (no prefix)
+      for (const k of attCls.keys) out[k] = row[k];
+      // attributes -> att_*
+      for (const k of attCls.numeric) out[`att_${k}`] = row[k];
+      // stats -> stats_*
       const s = join.attToStats.get(i);
-      if (!s) return row;
-      const out: PlayerRow = { ...row };
-      for (const [k, v] of Object.entries(s)) {
-        if (!(k in out)) out[`stats_${k}`] = v;
+      if (s) {
+        for (const k of statsCls.numeric) out[`stats_${k}`] = s[k];
       }
       return out;
     });
-    sections.push(summarize(merged, "Stats+Att (combinado)"));
-    sections.push(`Estratégia de junção: ${join.strategy}${join.warning ? ` — ${join.warning}` : ""}\n`);
-  } else if (sa_att.length) {
-    sections.push(summarize(sa_att, "Stats+Att (apenas Att carregado)"));
-  } else if (sa_stats.length) {
-    sections.push(summarize(sa_stats, "Stats+Att (apenas Stats carregado)"));
+
+    const matched = join.attToStats.size;
+    sections.push(
+      `### Stats+Att (combinado) — ${merged.length} jogadores, ${matched} com stats associadas\n` +
+      `Estratégia de junção: ${join.strategy}${join.warning ? ` — ${join.warning}` : ""}\n` +
+      `**Atributos (att_*)**: ${attCls.numeric.join(", ") || "(nenhum)"}\n` +
+      `**Métricas / Stats (stats_*)**: ${statsCls.numeric.join(", ") || "(nenhuma)"}\n\n` +
+      "```csv\n" + toCSV(merged, [...attCls.keys, ...attCls.numeric.map((c) => `att_${c}`), ...statsCls.numeric.map((c) => `stats_${c}`)]) + "\n```\n"
+    );
+  } else {
+    if (sa_att.length) {
+      const c = classifyCols(sa_att);
+      sections.push(
+        `### Stats+Att — apenas ficheiro de Att carregado (${sa_att.length} jogadores)\n` +
+        `**Atributos**: ${c.numeric.join(", ")}\n\n` +
+        "```csv\n" + toCSV(sa_att, [...c.keys, ...c.numeric]) + "\n```\n"
+      );
+    }
+    if (sa_stats.length) {
+      const c = classifyCols(sa_stats);
+      sections.push(
+        `### Stats+Att — apenas ficheiro de Stats/Métricas carregado (${sa_stats.length} jogadores)\n` +
+        `**Métricas**: ${c.numeric.join(", ")}\n\n` +
+        "```csv\n" + toCSV(sa_stats, [...c.keys, ...c.numeric]) + "\n```\n"
+      );
+    }
   }
 
-  if (statsOnly.length) sections.push(summarize(statsOnly, "Stats (página Stats)"));
-  if (attOnly.length) sections.push(summarize(attOnly, "Att (página Att)"));
+  if (statsOnly.length) {
+    const c = classifyCols(statsOnly);
+    sections.push(
+      `### Stats (página Stats) — ${statsOnly.length} jogadores — MÉTRICAS DE JOGO\n` +
+      `**Métricas**: ${c.numeric.join(", ")}\n\n` +
+      "```csv\n" + toCSV(statsOnly, [...c.keys, ...c.numeric]) + "\n```\n"
+    );
+  }
+  if (attOnly.length) {
+    const c = classifyCols(attOnly);
+    sections.push(
+      `### Att (página Att) — ${attOnly.length} jogadores — ATRIBUTOS\n` +
+      `**Atributos**: ${c.numeric.join(", ")}\n\n` +
+      "```csv\n" + toCSV(attOnly, [...c.keys, ...c.numeric]) + "\n```\n"
+    );
+  }
 
   if (!sections.length) return "(Nenhum ficheiro carregado. Pede ao utilizador para fazer upload de Stats ou Att primeiro.)";
   return sections.join("\n");
