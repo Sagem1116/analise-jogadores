@@ -231,13 +231,6 @@ function StatsTable() {
               value={colFilters[c]?.max ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], max: e.target.value } })} />
           </div>
         ) : (
-          <div className="flex gap-1">
-            <input type="number" placeholder="Min" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
-              value={colFilters[c]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], min: e.target.value } })} />
-            <input type="number" placeholder="Max" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
-              value={colFilters[c]?.max ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], max: e.target.value } })} />
-          </div>
-        ) : (
           <>
             <input
               list={listId}
