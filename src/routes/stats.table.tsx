@@ -218,11 +218,19 @@ function StatsTable() {
   );
 
   const renderFilterCell = (c: string, sticky = false) => {
-    const isNum = numericCols.has(c);
+    const isNum = numericCols.has(c) || MONEY_COLS.has(c);
+    const isMoney = MONEY_COLS.has(c);
     const listId = `dl-${c.replace(/\s+/g, "-")}`;
     return (
       <th key={c} className={`px-2 py-1.5 border-r border-border/40 ${sticky ? "sticky left-0 z-30 bg-[oklch(0.17_0.03_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : "bg-[oklch(0.17_0.03_285)]"}`}>
         {isNum ? (
+          <div className="flex gap-1">
+            <input type="number" placeholder={isMoney ? "Min €" : "Min"} className={`${isMoney ? "w-20" : "w-14"} rounded border border-border/60 bg-input px-1.5 py-1 text-xs`}
+              value={colFilters[c]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], min: e.target.value } })} />
+            <input type="number" placeholder={isMoney ? "Max €" : "Max"} className={`${isMoney ? "w-20" : "w-14"} rounded border border-border/60 bg-input px-1.5 py-1 text-xs`}
+              value={colFilters[c]?.max ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], max: e.target.value } })} />
+          </div>
+        ) : (
           <div className="flex gap-1">
             <input type="number" placeholder="Min" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
               value={colFilters[c]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], min: e.target.value } })} />
