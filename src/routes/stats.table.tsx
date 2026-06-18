@@ -14,7 +14,28 @@ export const Route = createFileRoute("/stats/table")({
 
 // Columns that should NEVER show as percentile cards (always raw values)
 const RAW_ONLY = new Set(["UID", "Age", "Wage", "Transfer Value", "Starts", "Minutes Played", "Mins", "Min"]);
+// Columns whose values are monetary strings — filtered with min/max numeric inputs
+const MONEY_COLS = new Set(["Wage", "Transfer Value"]);
 const PER_PAGE = 15;
+
+// Parse monetary strings like "3,355,000 €", "1M", "6.8M", "1M - 6.8M", "850K", "$1,200,000".
+// Returns [min, max] (equal when single value). null if no number found.
+function parseMoney(raw: unknown): [number, number] | null {
+  if (raw == null || raw === "") return null;
+  const s = String(raw).replace(/\u00A0/g, " ");
+  const re = /(-?\d[\d.,]*)\s*([kKmMbB])?/g;
+  const nums: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    const numStr = m[1].replace(/,/g, "");
+    const n = parseFloat(numStr);
+    if (Number.isNaN(n)) continue;
+    const mult = m[2] ? ({ k: 1e3, m: 1e6, b: 1e9 } as Record<string, number>)[m[2].toLowerCase()] : 1;
+    nums.push(n * mult);
+  }
+  if (!nums.length) return null;
+  return [Math.min(...nums), Math.max(...nums)];
+}
 
 function colorForPct(pct: number): string {
   if (pct >= 70) return "border-success/60 bg-success/10 text-success";
