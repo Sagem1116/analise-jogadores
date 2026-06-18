@@ -1,0 +1,476 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { AppHeader } from "@/components/AppHeader";
+import { useEffect, useMemo, useState } from "react";
+import { Copy, Download, Eye, Filter, Percent, Settings2, Search, ChevronUp, ChevronDown } from "lucide-react";
+import { toast } from "sonner";
+import * as XLSX from "xlsx";
+import { useSAData, isNumericColumn, computePercentiles, computeNormalized } from "@/lib/stats-att-store";
+import { ALL_ROLES, loadWeightsSync, fetchWeightsFromDB, subscribeWeights, type AllRoleWeights } from "@/lib/roles";
+import { loadAttWeightsSync, fetchAttWeightsFromDB, subscribeAttWeights, type AllAttWeights } from "@/lib/att-roles";
+
+export const Route = createFileRoute("/stats-att/table")({
+  head: () => ({ meta: [{ title: "Stats+Att Table | FMDataLab" }] }),
+  component: SATable,
+});
+
+const RAW_ONLY = new Set([
+  "IDU", "Nome", "Posição", "Posição Sec.", "Idade", "Altura", "Peso", "Inf",
+  "Clube", "Divisão", "Nac", "2ª Nac", "Internacionalizações", "Golos",
+  "Personalidade", "Relação com Imprensa", "Salário", "Valor Estimado",
+  "Pé Esquerdo", "Pé Direito", "Prós", "Contras",
+  "UID", "Name", "Age", "Wage", "Transfer Value", "Starts", "Minutes Played",
+]);
+const MONEY_COLS = new Set(["Salário", "Valor Estimado", "Wage", "Transfer Value"]);
+const PER_PAGE = 15;
+
+function parseMoney(raw: unknown): [number, number] | null {
+  if (raw == null || raw === "") return null;
+  const s = String(raw).replace(/\u00A0/g, " ");
+  const re = /(-?\d[\d.,]*)\s*([kKmMbB])?/g;
+  const nums: number[] = []; let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    const n = parseFloat(m[1].replace(/,/g, ""));
+    if (Number.isNaN(n)) continue;
+    const mult = m[2] ? ({ k: 1e3, m: 1e6, b: 1e9 } as Record<string, number>)[m[2].toLowerCase()] : 1;
+    nums.push(n * mult);
+  }
+  if (!nums.length) return null;
+  return [Math.min(...nums), Math.max(...nums)];
+}
+
+function colorForPct(pct: number): string {
+  if (pct >= 70) return "border-success/60 bg-success/10 text-success";
+  if (pct >= 40) return "border-warning/60 bg-warning/10 text-warning";
+  return "border-danger/60 bg-danger/10 text-danger";
+}
+
+function formatNum(n: number): string {
+  if (Math.abs(n) >= 1000) return n.toLocaleString();
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+function SATable() {
+  const { stats, att } = useSAData();
+  // Use Att as base table (more attribute info per player)
+  const players = att;
+  const [search, setSearch] = useState("");
+  const [showPercentiles, setShowPercentiles] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [roleSelectOpen, setRoleSelectOpen] = useState(false);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
+  const [page, setPage] = useState(1);
+  const [colFilters, setColFilters] = useState<Record<string, { min?: string; max?: string; text?: string }>>({});
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const [sWeights, setSWeights] = useState<AllRoleWeights>(() => loadWeightsSync());
+  const [aWeights, setAWeights] = useState<AllAttWeights>(() => loadAttWeightsSync());
+
+  useEffect(() => {
+    fetchWeightsFromDB().then(setSWeights).catch(() => {});
+    fetchAttWeightsFromDB().then(setAWeights).catch(() => {});
+    const u1 = subscribeWeights(() => setSWeights(loadWeightsSync()));
+    const u2 = subscribeAttWeights(() => setAWeights(loadAttWeightsSync()));
+    return () => { u1(); u2(); };
+  }, []);
+
+  const allColumns = useMemo(() => (players[0] ? Object.keys(players[0]) : []), [players]);
+  const nameCol = useMemo(() => allColumns.find((c) => c === "Nome" || c === "Name") ?? allColumns[0] ?? "", [allColumns]);
+  const numericCols = useMemo(() => new Set(allColumns.filter((c) => isNumericColumn(players, c))), [allColumns, players]);
+  const attPercentiles = useMemo(() => computePercentiles(players, [...numericCols]), [players, numericCols]);
+  const attNormalized = useMemo(() => computeNormalized(players, [...numericCols]), [players, numericCols]);
+
+  // Stats-side numeric cols + percentiles + index by name
+  const statsCols = useMemo(() => (stats[0] ? Object.keys(stats[0]) : []), [stats]);
+  const statsNumeric = useMemo(() => new Set(statsCols.filter((c) => isNumericColumn(stats, c))), [statsCols, stats]);
+  const statsPercentiles = useMemo(() => computePercentiles(stats, [...statsNumeric]), [stats, statsNumeric]);
+  const statsNameCol = useMemo(() => statsCols.find((c) => c === "Name" || c === "Nome") ?? statsCols[0] ?? "", [statsCols]);
+  const statsByName = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const r of stats) {
+      const n = String(r[statsNameCol] ?? "").trim().toLowerCase();
+      if (n) m.set(n, r);
+    }
+    return m;
+  }, [stats, statsNameCol]);
+
+  const filterSuggestions = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const c of allColumns) {
+      if (numericCols.has(c)) continue;
+      const set = new Set<string>();
+      for (let i = 0; i < players.length && set.size < 200; i++) {
+        const v = players[i][c]; if (v != null && v !== "") set.add(String(v));
+      }
+      map.set(c, [...set].sort());
+    }
+    return map;
+  }, [players, allColumns, numericCols]);
+
+  const visibleCols = useMemo(() => allColumns.filter((c) => !hidden.has(c)), [allColumns, hidden]);
+  const nameIdx = visibleCols.indexOf(nameCol);
+  const colsBeforeRoles = nameIdx >= 0 ? visibleCols.slice(0, nameIdx + 1) : [];
+  const colsAfterRoles = nameIdx >= 0 ? visibleCols.slice(nameIdx + 1) : visibleCols;
+
+  // Build role columns (3 per role)
+  const roleColumns = useMemo(() => {
+    const out: { key: string; label: string; kind: "att" | "stats" | "total"; role: string }[] = [];
+    for (const r of selectedRoles) {
+      out.push({ key: `__att__${r}`, label: `Score Att (${r})`, kind: "att", role: r });
+      out.push({ key: `__stats__${r}`, label: `Score Stats (${r})`, kind: "stats", role: r });
+      out.push({ key: `__total__${r}`, label: `Score Total (${r})`, kind: "total", role: r });
+    }
+    return out;
+  }, [selectedRoles]);
+
+  // Compute scores per row
+  const roleScores = useMemo(() => {
+    const result = new Map<number, Record<string, number>>();
+    if (!selectedRoles.length || !players.length) return result;
+    for (let idx = 0; idx < players.length; idx++) {
+      const p = players[idx];
+      const name = String(p[nameCol] ?? "").trim().toLowerCase();
+      const statsRow = statsByName.get(name);
+      const scores: Record<string, number> = {};
+      for (const role of selectedRoles) {
+        // Att score (60% norm + 40% pct)
+        const aw = aWeights[role] || {};
+        let aSum = 0, aTot = 0;
+        for (const stat in aw) {
+          const info = aw[stat];
+          const pctMap = attPercentiles.get(stat); const normMap = attNormalized.get(stat);
+          if (!pctMap || !normMap) continue;
+          const v = p[stat]; const num = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+          if (Number.isNaN(num)) continue;
+          let pct = pctMap.get(num) ?? 0; let norm = normMap.get(num) ?? 0;
+          if (info.invert) { pct = 100 - pct; norm = 100 - norm; }
+          aSum += (norm * 0.6 + pct * 0.4) * info.weight; aTot += info.weight;
+        }
+        const attScore = aTot ? Math.round(aSum / aTot) : 0;
+
+        // Stats score (percentile * weight)
+        const sw = sWeights[role] || {};
+        let sSum = 0, sTot = 0;
+        if (statsRow) {
+          for (const stat in sw) {
+            const info = sw[stat];
+            const pctMap = statsPercentiles.get(stat); if (!pctMap) continue;
+            const v = statsRow[stat]; const num = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+            if (Number.isNaN(num)) continue;
+            let pct = pctMap.get(num) ?? 0;
+            if (info.invert) pct = 100 - pct;
+            sSum += pct * info.weight; sTot += info.weight;
+          }
+        }
+        const statsScore = sTot ? Math.round(sSum / sTot) : 0;
+
+        const total = Math.round(Math.sqrt(attScore * statsScore));
+
+        scores[`__att__${role}`] = attScore;
+        scores[`__stats__${role}`] = statsScore;
+        scores[`__total__${role}`] = total;
+      }
+      result.set(idx, scores);
+    }
+    return result;
+  }, [players, selectedRoles, aWeights, sWeights, attPercentiles, attNormalized, statsPercentiles, statsByName, nameCol]);
+
+  const roleKeys = useMemo(() => new Set(roleColumns.map((c) => c.key)), [roleColumns]);
+
+  const filtered = useMemo(() => {
+    if (!players.length) return [] as { p: any; i: number }[];
+    const q = search.toLowerCase().trim();
+    const entries = Object.entries(colFilters).filter(([, f]) =>
+      f && ((f.text && f.text.trim()) || (f.min !== undefined && f.min !== "") || (f.max !== undefined && f.max !== ""))
+    );
+    const out: { p: any; i: number }[] = [];
+    for (let i = 0; i < players.length; i++) {
+      const p = players[i];
+      if (q && !String(p[nameCol] ?? "").toLowerCase().includes(q)) continue;
+      let ok = true;
+      for (const [col, f] of entries) {
+        const isRoleCol = roleKeys.has(col);
+        const isMoney = MONEY_COLS.has(col);
+        const rawVal = isRoleCol ? (roleScores.get(i)?.[col] ?? 0) : p[col];
+        if (f.text && f.text.trim()) {
+          if (!String(rawVal ?? "").toLowerCase().includes(f.text.toLowerCase())) { ok = false; break; }
+        }
+        if (f.min !== undefined && f.min !== "") {
+          const minF = parseFloat(f.min);
+          if (isMoney) { const rng = parseMoney(rawVal); if (!rng || rng[1] < minF) { ok = false; break; } }
+          else { const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? "")); if (Number.isNaN(n) || n < minF) { ok = false; break; } }
+        }
+        if (f.max !== undefined && f.max !== "") {
+          const maxF = parseFloat(f.max);
+          if (isMoney) { const rng = parseMoney(rawVal); if (!rng || rng[0] > maxF) { ok = false; break; } }
+          else { const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? "")); if (Number.isNaN(n) || n > maxF) { ok = false; break; } }
+        }
+      }
+      if (ok) out.push({ p, i });
+    }
+    if (sortBy) {
+      const { col, dir } = sortBy;
+      const isRole = roleKeys.has(col);
+      const sign = dir === "asc" ? 1 : -1;
+      out.sort((a, b) => {
+        const av = isRole ? (roleScores.get(a.i)?.[col] ?? 0) : a.p[col];
+        const bv = isRole ? (roleScores.get(b.i)?.[col] ?? 0) : b.p[col];
+        const an = typeof av === "number" ? av : parseFloat(String(av ?? ""));
+        const bn = typeof bv === "number" ? bv : parseFloat(String(bv ?? ""));
+        if (!Number.isNaN(an) && !Number.isNaN(bn)) return (an - bn) * sign;
+        return String(av ?? "").localeCompare(String(bv ?? "")) * sign;
+      });
+    }
+    return out;
+  }, [players, search, colFilters, sortBy, roleScores, roleKeys, nameCol]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const pageRows = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  useEffect(() => { setPage(1); }, [search, colFilters, sortBy]);
+
+  function exportExcel() {
+    const data = filtered.map(({ p, i }) => {
+      const row: Record<string, any> = {};
+      for (const c of colsBeforeRoles) row[c] = p[c];
+      for (const rc of roleColumns) row[rc.label] = roleScores.get(i)?.[rc.key] ?? 0;
+      for (const c of colsAfterRoles) row[c] = p[c];
+      return row;
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Stats+Att");
+    XLSX.writeFile(wb, "fmdatalab-stats-att.xlsx");
+  }
+
+  function toggleSort(col: string) {
+    setSortBy((s) => s?.col === col ? (s.dir === "desc" ? { col, dir: "asc" } : null) : { col, dir: "desc" });
+  }
+
+  if (!players.length || !stats.length) {
+    return (
+      <div className="min-h-screen">
+        <AppHeader />
+        <main className="mx-auto max-w-[1200px] px-6 py-20 text-center">
+          <p className="text-muted-foreground">Faltam dados. Faça upload dos dois ficheiros primeiro.</p>
+          <Link to="/stats-att" className="mt-4 inline-block rounded bg-primary px-4 py-2 text-sm font-medium">Ir para upload</Link>
+        </main>
+      </div>
+    );
+  }
+
+  const renderHeaderCell = (c: string, sticky = false) => (
+    <th key={c} className={`px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap border-r border-border/40 ${sticky ? "sticky left-0 z-30 bg-gradient-to-r from-[oklch(0.22_0.05_290)] to-[oklch(0.2_0.04_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : "bg-[oklch(0.2_0.04_285)]"}`}>
+      <button onClick={() => toggleSort(c)} className="inline-flex items-center gap-1 hover:text-primary">
+        {c}
+        {sortBy?.col === c && (sortBy.dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+      </button>
+    </th>
+  );
+
+  const renderFilterCell = (c: string, sticky = false) => {
+    const isNum = numericCols.has(c) || MONEY_COLS.has(c);
+    const isMoney = MONEY_COLS.has(c);
+    const listId = `dl-${c.replace(/\s+/g, "-")}`;
+    return (
+      <th key={c} className={`px-2 py-1.5 border-r border-border/40 ${sticky ? "sticky left-0 z-30 bg-[oklch(0.17_0.03_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : "bg-[oklch(0.17_0.03_285)]"}`}>
+        {isNum ? (
+          <div className="flex gap-1">
+            <input type="number" placeholder={isMoney ? "Min €" : "Min"} className={`${isMoney ? "w-20" : "w-14"} rounded border border-border/60 bg-input px-1.5 py-1 text-xs`}
+              value={colFilters[c]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], min: e.target.value } })} />
+            <input type="number" placeholder={isMoney ? "Max €" : "Max"} className={`${isMoney ? "w-20" : "w-14"} rounded border border-border/60 bg-input px-1.5 py-1 text-xs`}
+              value={colFilters[c]?.max ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], max: e.target.value } })} />
+          </div>
+        ) : (
+          <>
+            <input list={listId} placeholder="Filtrar..." className="w-full min-w-[100px] rounded border border-border/60 bg-input px-2 py-1 text-xs"
+              value={colFilters[c]?.text ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], text: e.target.value } })} />
+            <datalist id={listId}>{(filterSuggestions.get(c) ?? []).map((v) => <option key={v} value={v} />)}</datalist>
+          </>
+        )}
+      </th>
+    );
+  };
+
+  const renderBodyCell = (c: string, v: any, sticky = false) => {
+    const isNum = numericCols.has(c);
+    const num = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+    const isRaw = RAW_ONLY.has(c);
+    const pct = isNum && !isRaw && !Number.isNaN(num) ? attPercentiles.get(c)?.get(num) ?? 50 : null;
+    const display = showPercentiles && pct !== null ? `${pct}` : (isNum && !Number.isNaN(num) ? formatNum(num) : (v ?? ""));
+    return (
+      <td key={c} className={`px-3 py-2 whitespace-nowrap border-r border-border/30 ${sticky ? "sticky left-0 z-20 bg-[oklch(0.18_0.03_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)] font-medium" : ""}`}>
+        {c === nameCol ? (
+          <span className="inline-flex items-center gap-2">
+            <span className="font-semibold text-foreground">{v}</span>
+            <button onClick={() => { navigator.clipboard.writeText(String(v)); toast.success("Copiado"); }}
+              className="opacity-60 hover:opacity-100 hover:text-primary transition" title="Copiar nome">
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        ) : isNum && !isRaw && pct !== null ? (
+          <span className={`inline-block min-w-[3rem] rounded-full border px-2 py-0.5 text-center text-xs font-bold ${colorForPct(pct)}`}>{display}</span>
+        ) : (
+          <span className="text-sm text-foreground/90">{String(display)}</span>
+        )}
+      </td>
+    );
+  };
+
+  return (
+    <div className="min-h-screen">
+      <AppHeader />
+      <main className="mx-auto max-w-[1800px] px-4 py-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">Stats + Att</h1>
+            <p className="text-sm text-muted-foreground">{players.length.toLocaleString()} att · {stats.length.toLocaleString()} stats</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/stats-att" className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold btn-glow">
+              <Download className="h-4 w-4 rotate-180" /> Upload
+            </Link>
+            <Link to="/stats-att/weights" className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm hover:border-primary">
+              <Settings2 className="h-4 w-4" /> Stats+Att Score Weight
+            </Link>
+            <button onClick={() => setRoleSelectOpen((v) => !v)} className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm hover:border-primary">
+              Role Select {selectedRoles.length > 0 && <span className="rounded bg-primary px-1.5 py-0.5 text-xs">{selectedRoles.length}</span>}
+            </button>
+            <button onClick={() => setShowPercentiles((v) => !v)} className={`inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm ${showPercentiles ? "border-primary bg-primary/15" : "border-border bg-card hover:border-primary"}`}>
+              <Percent className="h-4 w-4" /> Show Percentiles
+            </button>
+            <button onClick={() => setShowFilters((v) => !v)} className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm hover:border-primary">
+              <Filter className="h-4 w-4" /> {showFilters ? "Hide" : "Show"} Filters
+            </button>
+            <button onClick={exportExcel} className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm hover:border-primary">
+              <Download className="h-4 w-4" /> Export to Excel
+            </button>
+            <div className="relative">
+              <button onClick={() => setViewOpen((v) => !v)} className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm hover:border-primary">
+                <Eye className="h-4 w-4" /> View
+              </button>
+              {viewOpen && (
+                <div className="absolute right-0 top-full z-50 mt-2 max-h-[70vh] w-72 overflow-y-auto rounded-md border border-border bg-popover p-3 shadow-2xl">
+                  <div className="mb-2 flex gap-2 text-xs">
+                    <button className="flex-1 rounded bg-secondary px-2 py-1" onClick={() => setHidden(new Set())}>View All</button>
+                    <button className="flex-1 rounded bg-secondary px-2 py-1" onClick={() => setHidden(new Set(allColumns))}>Hide All</button>
+                  </div>
+                  {allColumns.map((c) => (
+                    <label key={c} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-secondary">
+                      <input type="checkbox" checked={!hidden.has(c)} onChange={(e) => {
+                        const n = new Set(hidden); if (e.target.checked) n.delete(c); else n.add(c); setHidden(n);
+                      }} />
+                      <span className="truncate">{c}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {roleSelectOpen && (
+          <RoleSelector selected={selectedRoles} onChange={setSelectedRoles} onClose={() => setRoleSelectOpen(false)} />
+        )}
+
+        <div className="mb-3 flex items-center gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar nome..."
+              className="w-full rounded-md border border-border bg-input pl-9 pr-3 py-2 text-sm outline-none focus:border-primary" />
+          </div>
+        </div>
+
+        <div className="overflow-auto rounded-xl table-shell">
+          <table className="w-full text-sm border-separate border-spacing-0">
+            <thead className="sticky top-0 z-20">
+              <tr>
+                {colsBeforeRoles.map((c) => renderHeaderCell(c, c === nameCol))}
+                {roleColumns.map((rc) => (
+                  <th key={rc.key} className={`px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap border-r border-border/40 text-foreground ${
+                    rc.kind === "total" ? "bg-gradient-to-b from-[oklch(0.5_0.3_320)] to-[oklch(0.4_0.28_320)]"
+                    : rc.kind === "att" ? "bg-gradient-to-b from-primary/50 to-primary/25"
+                    : "bg-gradient-to-b from-[oklch(0.45_0.25_200)] to-[oklch(0.35_0.2_200)]"
+                  }`}>
+                    <button onClick={() => toggleSort(rc.key)} className="inline-flex items-center gap-1">
+                      {rc.label}
+                      {sortBy?.col === rc.key && (sortBy.dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+                    </button>
+                  </th>
+                ))}
+                {colsAfterRoles.map((c) => renderHeaderCell(c))}
+              </tr>
+              {showFilters && (
+                <tr>
+                  {colsBeforeRoles.map((c) => renderFilterCell(c, c === nameCol))}
+                  {roleColumns.map((rc) => (
+                    <th key={rc.key} className="px-2 py-1.5 bg-[oklch(0.17_0.03_285)] border-r border-border/40">
+                      <div className="flex gap-1">
+                        <input type="number" placeholder="Min" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
+                          value={colFilters[rc.key]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [rc.key]: { ...colFilters[rc.key], min: e.target.value } })} />
+                        <input type="number" placeholder="Max" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
+                          value={colFilters[rc.key]?.max ?? ""} onChange={(e) => setColFilters({ ...colFilters, [rc.key]: { ...colFilters[rc.key], max: e.target.value } })} />
+                      </div>
+                    </th>
+                  ))}
+                  {colsAfterRoles.map((c) => renderFilterCell(c))}
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {pageRows.map(({ p, i }, rowIdx) => (
+                <tr key={i} className={`${rowIdx % 2 === 0 ? "bg-[oklch(0.18_0.03_285)]" : "bg-[oklch(0.16_0.03_285)]"} hover:bg-primary/10 transition-colors`}>
+                  {colsBeforeRoles.map((c) => renderBodyCell(c, p[c], c === nameCol))}
+                  {roleColumns.map((rc) => {
+                    const s = roleScores.get(i)?.[rc.key] ?? 0;
+                    return (
+                      <td key={rc.key} className="px-3 py-2 border-r border-border/30">
+                        <span className={`inline-block min-w-[3rem] rounded-full border px-2 py-0.5 text-center text-xs font-bold ${colorForPct(s)}`}>{s}</span>
+                      </td>
+                    );
+                  })}
+                  {colsAfterRoles.map((c) => renderBodyCell(c, p[c]))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+          <div className="text-muted-foreground">{filtered.length.toLocaleString()} Results · {PER_PAGE}/página</div>
+          <div className="flex items-center gap-3">
+            <span>Page {page} of {totalPages}</span>
+            <button disabled={page === 1} onClick={() => setPage(1)} className="rounded border border-border px-2 py-1 hover:border-primary disabled:opacity-40">«</button>
+            <button disabled={page === 1} onClick={() => setPage((p) => p - 1)} className="rounded border border-border px-2 py-1 hover:border-primary disabled:opacity-40">‹</button>
+            <button disabled={page === totalPages} onClick={() => setPage((p) => p + 1)} className="rounded border border-border px-2 py-1 hover:border-primary disabled:opacity-40">›</button>
+            <button disabled={page === totalPages} onClick={() => setPage(totalPages)} className="rounded border border-border px-2 py-1 hover:border-primary disabled:opacity-40">»</button>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function RoleSelector({ selected, onChange, onClose }: { selected: string[]; onChange: (r: string[]) => void; onClose: () => void }) {
+  const [q, setQ] = useState("");
+  const filtered = ALL_ROLES.filter((r) => r.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div className="mb-4 rounded-lg border border-primary/40 bg-card p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="font-semibold">Selecionar Roles ({selected.length})</h3>
+        <div className="flex gap-2">
+          <button onClick={() => onChange([])} className="rounded border border-border px-2 py-1 text-xs">Limpar</button>
+          <button onClick={onClose} className="rounded bg-primary px-3 py-1 text-xs">Fechar</button>
+        </div>
+      </div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Pesquisar role..." className="mb-3 w-full rounded border border-border bg-input px-3 py-1.5 text-sm" />
+      <div className="grid max-h-60 grid-cols-2 gap-1 overflow-y-auto md:grid-cols-4">
+        {filtered.map((r) => (
+          <label key={r} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-secondary">
+            <input type="checkbox" checked={selected.includes(r)} onChange={(e) => onChange(e.target.checked ? [...selected, r] : selected.filter((x) => x !== r))} />
+            <span className="truncate">{r}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
