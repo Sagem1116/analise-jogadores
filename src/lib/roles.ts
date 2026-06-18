@@ -1,3 +1,5 @@
+import { supabase } from "@/integrations/supabase/client";
+
 export const ROLE_GROUPS: Record<string, string[]> = {
   "Centre Back": [
     "Central Defender (De)", "Central Defender (St)", "Central Defender (Co)",
@@ -73,14 +75,43 @@ export const ALL_ROLES = Object.values(ROLE_GROUPS).flat();
 export type RoleWeights = Record<string, { weight: number; invert?: boolean }>;
 export type AllRoleWeights = Record<string, RoleWeights>;
 
-const STORAGE_KEY = "fmdatalab_role_weights_v1";
+const CACHE_KEY = "fmdatalab_role_weights_cache_v2";
+const listeners = new Set<() => void>();
+let cache: AllRoleWeights | null = null;
 
-export function loadWeights(): AllRoleWeights {
+function emit() { listeners.forEach((l) => l()); }
+
+export function loadWeightsSync(): AllRoleWeights {
+  if (cache) return cache;
   if (typeof localStorage === "undefined") return {};
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; }
+  try { cache = JSON.parse(localStorage.getItem(CACHE_KEY) || "{}"); return cache!; } catch { return {}; }
 }
 
-export function saveWeights(w: AllRoleWeights) {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(w));
+export async function fetchWeightsFromDB(): Promise<AllRoleWeights> {
+  const { data, error } = await supabase.from("role_weights").select("role, weights");
+  if (error) throw error;
+  const out: AllRoleWeights = {};
+  for (const row of data ?? []) out[row.role as string] = (row.weights as RoleWeights) ?? {};
+  cache = out;
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(out)); } catch {}
+  emit();
+  return out;
 }
+
+export async function saveRoleWeights(role: string, weights: RoleWeights): Promise<void> {
+  const { error } = await supabase.from("role_weights").upsert({ role, weights, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  cache = { ...(cache || {}), [role]: weights };
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)); } catch {}
+  emit();
+}
+
+export async function deleteRoleWeights(role: string): Promise<void> {
+  const { error } = await supabase.from("role_weights").delete().eq("role", role);
+  if (error) throw error;
+  if (cache) { delete cache[role]; }
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache || {})); } catch {}
+  emit();
+}
+
+export function subscribeWeights(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; }
