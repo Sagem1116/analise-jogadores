@@ -58,34 +58,42 @@ export function computePercentiles(rows: PlayerRow[], columns: string[]): Map<st
       const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
       if (!Number.isNaN(n) && Number.isFinite(n)) values.push(n);
     }
-    if (!values.length) continue;
-    const sorted = [...values].sort((a, b) => a - b);
+    const n = values.length;
+    if (!n) continue;
+    values.sort((a, b) => a - b);
     const map = new Map<number, number>();
-    for (const v of values) {
-      const idx = sorted.findIndex((x) => x >= v);
-      const pct = ((idx === -1 ? sorted.length : idx) / sorted.length) * 100;
-      map.set(v, Math.round(pct));
+    let i = 0;
+    while (i < n) {
+      let j = i;
+      while (j < n && values[j] === values[i]) j++;
+      const pct = ((i + (j - i) / 2) / n) * 100;
+      map.set(values[i], Math.round(pct));
+      i = j;
     }
     result.set(col, map);
   }
   return result;
 }
 
-// Compute normalized (0-100) min-max per column.
 export function computeNormalized(rows: PlayerRow[], columns: string[]): Map<string, Map<number, number>> {
   const result = new Map<string, Map<number, number>>();
   for (const col of columns) {
-    const values: number[] = [];
+    let min = Infinity, max = -Infinity, has = false;
+    const seen: number[] = [];
     for (const r of rows) {
       const v = r[col];
       const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
-      if (!Number.isNaN(n) && Number.isFinite(n)) values.push(n);
+      if (Number.isNaN(n) || !Number.isFinite(n)) continue;
+      has = true;
+      if (n < min) min = n;
+      if (n > max) max = n;
+      seen.push(n);
     }
-    if (!values.length) continue;
-    const min = Math.min(...values), max = Math.max(...values);
-    const map = new Map<number, number>();
+    if (!has) continue;
     const range = max - min;
-    for (const v of values) {
+    const map = new Map<number, number>();
+    for (const v of seen) {
+      if (map.has(v)) continue;
       map.set(v, range === 0 ? 100 : Math.round(((v - min) / range) * 100));
     }
     result.set(col, map);
