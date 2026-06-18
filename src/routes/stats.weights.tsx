@@ -1,9 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppHeader } from "@/components/AppHeader";
-import { useMemo, useState } from "react";
-import { ALL_ROLES, ROLE_GROUPS, loadWeights, saveWeights, type AllRoleWeights } from "@/lib/roles";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ALL_ROLES, ROLE_GROUPS, loadWeightsSync, fetchWeightsFromDB,
+  saveRoleWeights, deleteRoleWeights, subscribeWeights, type AllRoleWeights,
+} from "@/lib/roles";
 import { usePlayers } from "@/lib/stats-store";
-import { Plus, Trash2, Save, RotateCcw, ArrowLeftRight, Search } from "lucide-react";
+import { Plus, Trash2, Save, RotateCcw, ArrowLeftRight, Search, Cloud } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/stats/weights")({
@@ -14,11 +17,17 @@ export const Route = createFileRoute("/stats/weights")({
 function WeightsPage() {
   const players = usePlayers();
   const allStats = useMemo(() => (players[0] ? Object.keys(players[0]) : []), [players]);
-  const [weights, setWeights] = useState<AllRoleWeights>(() => loadWeights());
+  const [weights, setWeights] = useState<AllRoleWeights>(() => loadWeightsSync());
   const [activeRole, setActiveRole] = useState<string>(ALL_ROLES[0]);
   const [roleQuery, setRoleQuery] = useState("");
   const [statQuery, setStatQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetchWeightsFromDB().then(setWeights).catch((e) => toast.error("Falha ao carregar pesos: " + e.message));
+    return subscribeWeights(() => setWeights(loadWeightsSync()));
+  }, []);
 
   const current = weights[activeRole] || {};
   const usedStats = Object.keys(current);
@@ -40,10 +49,18 @@ function WeightsPage() {
     update(stat, { weight: 50, invert: false });
     setAddOpen(false); setStatQuery("");
   }
-  function persist() { saveWeights(weights); toast.success("Pesos guardados"); }
-  function resetRole() {
+  async function persist() {
+    setSaving(true);
+    try {
+      await saveRoleWeights(activeRole, weights[activeRole] || {});
+      toast.success("Pesos guardados na cloud");
+    } catch (e: any) { toast.error("Erro: " + e.message); }
+    finally { setSaving(false); }
+  }
+  async function resetRole() {
     setWeights((w) => { const n = { ...w }; delete n[activeRole]; return n; });
-    toast.success("Role limpo");
+    try { await deleteRoleWeights(activeRole); toast.success("Role limpo"); }
+    catch (e: any) { toast.error(e.message); }
   }
 
   return (
@@ -53,18 +70,19 @@ function WeightsPage() {
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Stats Score Weight</h1>
-            <p className="text-sm text-muted-foreground">Defina o peso de cada stat (0-100) para cada role. Pode marcar stats negativas como invertidas.</p>
+            <p className="text-sm text-muted-foreground flex items-center gap-2">
+              <Cloud className="h-3.5 w-3.5 text-primary" /> Guardado na cloud · sincronizado entre dispositivos.
+            </p>
           </div>
           <div className="flex gap-2">
             <Link to="/stats/table" className="rounded border border-border bg-card px-4 py-2 text-sm hover:border-primary">Voltar à tabela</Link>
-            <button onClick={persist} className="inline-flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-semibold btn-glow">
-              <Save className="h-4 w-4" /> Guardar
+            <button onClick={persist} disabled={saving} className="inline-flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-semibold btn-glow disabled:opacity-60">
+              <Save className="h-4 w-4" /> {saving ? "A guardar..." : "Guardar role"}
             </button>
           </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-[320px_1fr]">
-          {/* Roles sidebar */}
           <aside className="rounded-lg border border-border bg-card p-3">
             <div className="relative mb-3">
               <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -93,7 +111,6 @@ function WeightsPage() {
             </div>
           </aside>
 
-          {/* Editor */}
           <section className="rounded-lg border border-border bg-card p-4">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold">{activeRole}</h2>
@@ -135,7 +152,7 @@ function WeightsPage() {
                     <div className="truncate text-sm font-medium">{stat}</div>
                     <input type="range" min={0} max={100} value={info.weight}
                       onChange={(e) => update(stat, { weight: Number(e.target.value) })}
-                      className="w-48 accent-[oklch(0.58_0.25_295)]" />
+                      className="w-48" />
                     <input type="number" min={0} max={100} value={info.weight}
                       onChange={(e) => update(stat, { weight: Math.max(0, Math.min(100, Number(e.target.value))) })}
                       className="w-16 rounded border border-border bg-input px-2 py-1 text-sm text-center" />
