@@ -107,15 +107,17 @@ function StatsTable() {
       if (q && !String(p.Name ?? "").toLowerCase().includes(q)) continue;
       let ok = true;
       for (const [col, f] of entries) {
+        const isRoleCol = selectedRoles.includes(col);
+        const rawVal = isRoleCol ? (roleScores.get(i)?.[col] ?? 0) : p[col];
         if (f.text && f.text.trim()) {
-          if (!String(p[col] ?? "").toLowerCase().includes(f.text.toLowerCase())) { ok = false; break; }
+          if (!String(rawVal ?? "").toLowerCase().includes(f.text.toLowerCase())) { ok = false; break; }
         }
         if (f.min !== undefined && f.min !== "") {
-          const v = p[col]; const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+          const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
           if (Number.isNaN(n) || n < parseFloat(f.min)) { ok = false; break; }
         }
         if (f.max !== undefined && f.max !== "") {
-          const v = p[col]; const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+          const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
           if (Number.isNaN(n) || n > parseFloat(f.max)) { ok = false; break; }
         }
       }
@@ -325,7 +327,16 @@ function StatsTable() {
               {showFilters && (
                 <tr>
                   {colsBeforeRoles.map((c) => renderFilterCell(c, c === "Name"))}
-                  {selectedRoles.map((r) => <th key={r} className="bg-[oklch(0.17_0.03_285)] border-r border-border/40" />)}
+                  {selectedRoles.map((r) => (
+                    <th key={r} className="px-2 py-1.5 bg-[oklch(0.17_0.03_285)] border-r border-border/40">
+                      <div className="flex gap-1">
+                        <input type="number" placeholder="Min" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
+                          value={colFilters[r]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [r]: { ...colFilters[r], min: e.target.value } })} />
+                        <input type="number" placeholder="Max" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
+                          value={colFilters[r]?.max ?? ""} onChange={(e) => setColFilters({ ...colFilters, [r]: { ...colFilters[r], max: e.target.value } })} />
+                      </div>
+                    </th>
+                  ))}
                   {colsAfterRoles.map((c) => renderFilterCell(c))}
                 </tr>
               )}
