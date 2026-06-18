@@ -11,11 +11,13 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as StatsAttRouteImport } from './routes/stats-att'
 import { Route as DashboardRouteImport } from './routes/dashboard'
-import { Route as AttRouteImport } from './routes/att'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StatsIndexRouteImport } from './routes/stats.index'
+import { Route as AttIndexRouteImport } from './routes/att.index'
 import { Route as StatsWeightsRouteImport } from './routes/stats.weights'
 import { Route as StatsTableRouteImport } from './routes/stats.table'
+import { Route as AttWeightsRouteImport } from './routes/att.weights'
+import { Route as AttTableRouteImport } from './routes/att.table'
 
 const StatsAttRoute = StatsAttRouteImport.update({
   id: '/stats-att',
@@ -25,11 +27,6 @@ const StatsAttRoute = StatsAttRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AttRoute = AttRouteImport.update({
-  id: '/att',
-  path: '/att',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -42,6 +39,11 @@ const StatsIndexRoute = StatsIndexRouteImport.update({
   path: '/stats/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AttIndexRoute = AttIndexRouteImport.update({
+  id: '/att/',
+  path: '/att/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StatsWeightsRoute = StatsWeightsRouteImport.update({
   id: '/stats/weights',
   path: '/stats/weights',
@@ -52,72 +54,96 @@ const StatsTableRoute = StatsTableRouteImport.update({
   path: '/stats/table',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AttWeightsRoute = AttWeightsRouteImport.update({
+  id: '/att/weights',
+  path: '/att/weights',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AttTableRoute = AttTableRouteImport.update({
+  id: '/att/table',
+  path: '/att/table',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/att': typeof AttRoute
   '/dashboard': typeof DashboardRoute
   '/stats-att': typeof StatsAttRoute
+  '/att/table': typeof AttTableRoute
+  '/att/weights': typeof AttWeightsRoute
   '/stats/table': typeof StatsTableRoute
   '/stats/weights': typeof StatsWeightsRoute
+  '/att/': typeof AttIndexRoute
   '/stats/': typeof StatsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/att': typeof AttRoute
   '/dashboard': typeof DashboardRoute
   '/stats-att': typeof StatsAttRoute
+  '/att/table': typeof AttTableRoute
+  '/att/weights': typeof AttWeightsRoute
   '/stats/table': typeof StatsTableRoute
   '/stats/weights': typeof StatsWeightsRoute
+  '/att': typeof AttIndexRoute
   '/stats': typeof StatsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/att': typeof AttRoute
   '/dashboard': typeof DashboardRoute
   '/stats-att': typeof StatsAttRoute
+  '/att/table': typeof AttTableRoute
+  '/att/weights': typeof AttWeightsRoute
   '/stats/table': typeof StatsTableRoute
   '/stats/weights': typeof StatsWeightsRoute
+  '/att/': typeof AttIndexRoute
   '/stats/': typeof StatsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/att'
     | '/dashboard'
     | '/stats-att'
+    | '/att/table'
+    | '/att/weights'
     | '/stats/table'
     | '/stats/weights'
+    | '/att/'
     | '/stats/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/att'
     | '/dashboard'
     | '/stats-att'
+    | '/att/table'
+    | '/att/weights'
     | '/stats/table'
     | '/stats/weights'
+    | '/att'
     | '/stats'
   id:
     | '__root__'
     | '/'
-    | '/att'
     | '/dashboard'
     | '/stats-att'
+    | '/att/table'
+    | '/att/weights'
     | '/stats/table'
     | '/stats/weights'
+    | '/att/'
     | '/stats/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AttRoute: typeof AttRoute
   DashboardRoute: typeof DashboardRoute
   StatsAttRoute: typeof StatsAttRoute
+  AttTableRoute: typeof AttTableRoute
+  AttWeightsRoute: typeof AttWeightsRoute
   StatsTableRoute: typeof StatsTableRoute
   StatsWeightsRoute: typeof StatsWeightsRoute
+  AttIndexRoute: typeof AttIndexRoute
   StatsIndexRoute: typeof StatsIndexRoute
 }
 
@@ -137,13 +163,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/att': {
-      id: '/att'
-      path: '/att'
-      fullPath: '/att'
-      preLoaderRoute: typeof AttRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -156,6 +175,13 @@ declare module '@tanstack/react-router' {
       path: '/stats'
       fullPath: '/stats/'
       preLoaderRoute: typeof StatsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/att/': {
+      id: '/att/'
+      path: '/att'
+      fullPath: '/att/'
+      preLoaderRoute: typeof AttIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/stats/weights': {
@@ -172,16 +198,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StatsTableRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/att/weights': {
+      id: '/att/weights'
+      path: '/att/weights'
+      fullPath: '/att/weights'
+      preLoaderRoute: typeof AttWeightsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/att/table': {
+      id: '/att/table'
+      path: '/att/table'
+      fullPath: '/att/table'
+      preLoaderRoute: typeof AttTableRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AttRoute: AttRoute,
   DashboardRoute: DashboardRoute,
   StatsAttRoute: StatsAttRoute,
+  AttTableRoute: AttTableRoute,
+  AttWeightsRoute: AttWeightsRoute,
   StatsTableRoute: StatsTableRoute,
   StatsWeightsRoute: StatsWeightsRoute,
+  AttIndexRoute: AttIndexRoute,
   StatsIndexRoute: StatsIndexRoute,
 }
 export const routeTree = rootRouteImport
