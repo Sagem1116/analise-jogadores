@@ -8,6 +8,7 @@ const navItems = [
   { to: "/stats-att", label: "Stats+Att" },
   { to: "/metricas-gemini", label: "Métricas Gemini" },
   { to: "/nuno-stats-att", label: "Nuno Stats+Att" },
+  { to: "/stat-att-leak", label: "Stat+Att Leak" },
 ];
 
 export function AppHeader() {

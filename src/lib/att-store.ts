@@ -11,18 +11,34 @@ function emit() { listeners.forEach((l) => l()); }
 
 export function setAttPlayers(rows: PlayerRow[]) {
   cache = rows;
-  try { sessionStorage.setItem(KEY, JSON.stringify(rows)); } catch {}
+  try { localStorage.setItem(KEY, JSON.stringify(rows)); } catch {}
   emit();
 }
 
 export function getAttPlayers(): PlayerRow[] {
   if (cache) return cache;
-  if (typeof sessionStorage === "undefined") return [];
+  if (typeof localStorage === "undefined") return [];
   try {
-    const raw = sessionStorage.getItem(KEY);
+    const raw = localStorage.getItem(KEY);
     cache = raw ? JSON.parse(raw) : [];
     return cache!;
   } catch { return []; }
+}
+
+export function clearAttData() {
+  cache = null;
+  try { localStorage.removeItem(KEY); } catch {}
+  try { sessionStorage.removeItem(KEY); } catch {}
+  emit();
+}
+
+if (typeof window !== "undefined") {
+  try {
+    if (!localStorage.getItem(KEY)) {
+      const legacy = sessionStorage.getItem(KEY);
+      if (legacy) localStorage.setItem(KEY, legacy);
+    }
+  } catch {}
 }
 
 export function useAttPlayers() {

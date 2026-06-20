@@ -13,24 +13,45 @@ function emit() { listeners.forEach((l) => l()); }
 
 export function setSAStats(rows: PlayerRow[]) {
   statsCache = rows;
-  try { sessionStorage.setItem(KEY_STATS, JSON.stringify(rows)); } catch {}
+  try { localStorage.setItem(KEY_STATS, JSON.stringify(rows)); } catch {}
   emit();
 }
 export function setSAAtt(rows: PlayerRow[]) {
   attCache = rows;
-  try { sessionStorage.setItem(KEY_ATT, JSON.stringify(rows)); } catch {}
+  try { localStorage.setItem(KEY_ATT, JSON.stringify(rows)); } catch {}
   emit();
 }
 
 export function getSAStats(): PlayerRow[] {
   if (statsCache) return statsCache;
-  if (typeof sessionStorage === "undefined") return [];
-  try { const raw = sessionStorage.getItem(KEY_STATS); statsCache = raw ? JSON.parse(raw) : []; return statsCache!; } catch { return []; }
+  if (typeof localStorage === "undefined") return [];
+  try { const raw = localStorage.getItem(KEY_STATS); statsCache = raw ? JSON.parse(raw) : []; return statsCache!; } catch { return []; }
 }
 export function getSAAtt(): PlayerRow[] {
   if (attCache) return attCache;
-  if (typeof sessionStorage === "undefined") return [];
-  try { const raw = sessionStorage.getItem(KEY_ATT); attCache = raw ? JSON.parse(raw) : []; return attCache!; } catch { return []; }
+  if (typeof localStorage === "undefined") return [];
+  try { const raw = localStorage.getItem(KEY_ATT); attCache = raw ? JSON.parse(raw) : []; return attCache!; } catch { return []; }
+}
+
+export function clearSAData() {
+  statsCache = null;
+  attCache = null;
+  try { localStorage.removeItem(KEY_STATS); localStorage.removeItem(KEY_ATT); } catch {}
+  // Clean up legacy sessionStorage too
+  try { sessionStorage.removeItem(KEY_STATS); sessionStorage.removeItem(KEY_ATT); } catch {}
+  emit();
+}
+
+// Migrate from sessionStorage (legacy) to localStorage if needed
+if (typeof window !== "undefined") {
+  try {
+    for (const k of [KEY_STATS, KEY_ATT]) {
+      if (!localStorage.getItem(k)) {
+        const legacy = sessionStorage.getItem(k);
+        if (legacy) localStorage.setItem(k, legacy);
+      }
+    }
+  } catch {}
 }
 
 export function useSAData() {

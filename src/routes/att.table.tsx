@@ -6,6 +6,7 @@ import { Copy, Download, Eye, Filter, Percent, Settings2, Search, ChevronUp, Che
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { ALL_ROLES, loadAttWeightsSync, fetchAttWeightsFromDB, subscribeAttWeights, type AllAttWeights } from "@/lib/att-roles";
+import { useFormula, attComponent } from "@/lib/score-formula";
 
 export const Route = createFileRoute("/att/table")({
   head: () => ({ meta: [{ title: "Att Table | FMDataLab" }] }),
@@ -73,6 +74,7 @@ function AttTable() {
   const [colFilters, setColFilters] = useState<Record<string, { min?: string; max?: string; text?: string }>>(initView.colFilters || {});
   const [hidden, setHidden] = useState<Set<string>>(() => new Set(initView.hidden || []));
   const [weights, setWeights] = useState<AllAttWeights>(() => loadAttWeightsSync());
+  const formula = useFormula();
 
   useEffect(() => {
     try { localStorage.setItem(VIEW_KEY, JSON.stringify({ hidden: [...hidden], colFilters, sortBy })); } catch {}
@@ -128,8 +130,8 @@ function AttTable() {
           let pct = pctMap.get(num) ?? 0;
           let norm = normMap.get(num) ?? 0;
           if (info.invert) { pct = 100 - pct; norm = 100 - norm; }
-          // Attribute Component = 60% normalized + 40% percentile
-          const component = norm * 0.6 + pct * 0.4;
+          // Attribute Component blended via configurable formula
+          const component = attComponent(norm, pct, formula);
           sum += component * info.weight; totalW += info.weight;
         }
         scores[role] = totalW ? Math.round(sum / totalW) : 0;
@@ -137,7 +139,7 @@ function AttTable() {
       result.set(idx, scores);
     }
     return result;
-  }, [players, selectedRoles, weights, percentilesMap, normalizedMap]);
+  }, [players, selectedRoles, weights, percentilesMap, normalizedMap, formula]);
 
   const filtered = useMemo(() => {
     if (!players.length) return [] as { p: any; i: number }[];

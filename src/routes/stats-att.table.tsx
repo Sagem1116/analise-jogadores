@@ -1,13 +1,14 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AppHeader } from "@/components/AppHeader";
-import { useEffect, useMemo, useState } from "react";
-import { Copy, Download, Eye, Filter, Percent, Settings2, Search, ChevronUp, ChevronDown, AlertTriangle } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Copy, Download, Eye, Filter, Percent, Settings2, Search, ChevronUp, ChevronDown, AlertTriangle, GripVertical, X } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { useSAData, isNumericColumn, computePercentiles, computeNormalized } from "@/lib/stats-att-store";
 import { ALL_ROLES, loadWeightsSync, fetchWeightsFromDB, subscribeWeights, type AllRoleWeights } from "@/lib/roles";
 import { loadAttWeightsSync, fetchAttWeightsFromDB, subscribeAttWeights, type AllAttWeights } from "@/lib/att-roles";
 import { joinPlayers, scoreToTone } from "@/lib/player-join";
+import { useFormula, attComponent, combineTotal, findMoneyCol, computeMoneyPercentiles, applyFinancialAdjust, MARKET_COL_CANDIDATES, WAGE_COL_CANDIDATES } from "@/lib/score-formula";
 
 export const Route = createFileRoute("/stats-att/table")({
   head: () => ({ meta: [{ title: "Stats+Att Table | FMDataLab" }] }),
@@ -23,8 +24,10 @@ const RAW_ONLY = new Set([
   "UID", "Name", "Age", "Wage", "Transfer Value", "Starts", "Minutes Played",
 ]);
 const MONEY_COLS = new Set(["Salário", "Valor Estimado", "Wage", "Transfer Value", "Stats: Wage", "Stats: Transfer Value"]);
-const PER_PAGE = 15;
+const PAGE_SIZES = [15, 30, 50, 100, 150] as const;
 const VIEW_KEY = "fmdatalab_view_sa";
+const ROLES_KEY = "fmdatalab_sa_selected_roles";
+const PAGESIZE_KEY = "fmdatalab_sa_page_size";
 
 function parseMoney(raw: unknown): [number, number] | null {
   if (raw == null || raw === "") return null;
@@ -48,13 +51,24 @@ function formatNum(n: number): string {
 
 type ViewState = {
   hidden: string[];
-  colFilters: Record<string, { min?: string; max?: string; text?: string }>;
+  colFilters: Record<string, { min?: string; max?: string; text?: string; pctMin?: string; pctMax?: string }>;
   sortBy: { col: string; dir: "asc" | "desc" } | null;
+  colOrder?: string[];
+  colWidths?: Record<string, number>;
 };
 function loadView(): ViewState {
   if (typeof localStorage === "undefined") return { hidden: [], colFilters: {}, sortBy: null };
   try { return JSON.parse(localStorage.getItem(VIEW_KEY) || "null") ?? { hidden: [], colFilters: {}, sortBy: null }; }
   catch { return { hidden: [], colFilters: {}, sortBy: null }; }
+}
+function loadSelectedRoles(): string[] {
+  if (typeof localStorage === "undefined") return [];
+  try { return JSON.parse(localStorage.getItem(ROLES_KEY) || "[]"); } catch { return []; }
+}
+function loadPageSize(): number {
+  if (typeof localStorage === "undefined") return 15;
+  const n = Number(localStorage.getItem(PAGESIZE_KEY));
+  return (PAGE_SIZES as readonly number[]).includes(n) ? n : 15;
 }
 
 function SATable() {
@@ -62,23 +76,38 @@ function SATable() {
   const navigate = useNavigate();
   const players = att;
   const initView = loadView();
+  const formula = useFormula();
   const [search, setSearch] = useState("");
   const [showPercentiles, setShowPercentiles] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
   const [viewOpen, setViewOpen] = useState(false);
+  const [viewSearch, setViewSearch] = useState("");
   const [roleSelectOpen, setRoleSelectOpen] = useState(false);
-  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(() => loadSelectedRoles());
   const [sortBy, setSortBy] = useState<ViewState["sortBy"]>(initView.sortBy);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(() => loadPageSize());
   const [colFilters, setColFilters] = useState<ViewState["colFilters"]>(initView.colFilters || {});
   const [hidden, setHidden] = useState<Set<string>>(() => new Set(initView.hidden || []));
+  const [colOrder, setColOrder] = useState<string[]>(initView.colOrder || []);
+  const [colWidths, setColWidths] = useState<Record<string, number>>(initView.colWidths || {});
   const [sWeights, setSWeights] = useState<AllRoleWeights>(() => loadWeightsSync());
   const [aWeights, setAWeights] = useState<AllAttWeights>(() => loadAttWeightsSync());
+  const dragColRef = useRef<string | null>(null);
+  const resizeRef = useRef<{ col: string; startX: number; startW: number } | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const SCROLL_KEY = "fmdatalab_sa_table_scroll";
 
   // Persist view prefs
   useEffect(() => {
-    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ hidden: [...hidden], colFilters, sortBy })); } catch {}
-  }, [hidden, colFilters, sortBy]);
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ hidden: [...hidden], colFilters, sortBy, colOrder, colWidths })); } catch {}
+  }, [hidden, colFilters, sortBy, colOrder, colWidths]);
+  useEffect(() => {
+    try { localStorage.setItem(ROLES_KEY, JSON.stringify(selectedRoles)); } catch {}
+  }, [selectedRoles]);
+  useEffect(() => {
+    try { localStorage.setItem(PAGESIZE_KEY, String(pageSize)); } catch {}
+  }, [pageSize]);
 
   useEffect(() => {
     fetchWeightsFromDB().then(setSWeights).catch(() => {});
@@ -113,6 +142,11 @@ function SATable() {
   // All columns union for visibility toggle
   const allColumns = useMemo(() => [...attCols, ...statsColsPrefixed], [attCols, statsColsPrefixed]);
 
+  const marketCol = useMemo(() => findMoneyCol(att, MARKET_COL_CANDIDATES), [att]);
+  const wageCol = useMemo(() => findMoneyCol(att, WAGE_COL_CANDIDATES), [att]);
+  const marketPctMap = useMemo(() => computeMoneyPercentiles(att, marketCol), [att, marketCol]);
+  const wagePctMap = useMemo(() => computeMoneyPercentiles(att, wageCol), [att, wageCol]);
+
   const filterSuggestions = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const c of attCols) {
@@ -126,7 +160,14 @@ function SATable() {
     return map;
   }, [players, attCols, attNumeric]);
 
-  const visibleCols = useMemo(() => allColumns.filter((c) => !hidden.has(c)), [allColumns, hidden]);
+  const orderedAllColumns = useMemo(() => {
+    if (!colOrder.length) return allColumns;
+    const known = new Set(allColumns);
+    const ordered = colOrder.filter((c) => known.has(c));
+    for (const c of allColumns) if (!ordered.includes(c)) ordered.push(c);
+    return ordered;
+  }, [allColumns, colOrder]);
+  const visibleCols = useMemo(() => orderedAllColumns.filter((c) => !hidden.has(c)), [orderedAllColumns, hidden]);
   const visibleAtt = visibleCols.filter((c) => !c.startsWith(STATS_PREFIX));
   const visibleStats = visibleCols.filter((c) => c.startsWith(STATS_PREFIX));
   const nameIdx = visibleAtt.indexOf(nameCol);
@@ -162,7 +203,7 @@ function SATable() {
           if (Number.isNaN(num)) continue;
           let pct = pctMap.get(num) ?? 0; let norm = normMap.get(num) ?? 0;
           if (info.invert) { pct = 100 - pct; norm = 100 - norm; }
-          aSum += (norm * 0.6 + pct * 0.4) * info.weight; aTot += info.weight;
+          aSum += attComponent(norm, pct, formula) * info.weight; aTot += info.weight;
         }
         const attScore = aTot ? Math.round(aSum / aTot) : 0;
         const sw = sWeights[role] || {};
@@ -175,11 +216,16 @@ function SATable() {
             if (Number.isNaN(num)) continue;
             let pct = pctMap.get(num) ?? 0;
             if (info.invert) pct = 100 - pct;
-            sSum += pct * info.weight; sTot += info.weight;
+            sSum += pct * formula.statsPctBlend * info.weight; sTot += info.weight;
           }
         }
         const statsScore = sTot ? Math.round(sSum / sTot) : 0;
-        const total = Math.round(Math.sqrt(attScore * statsScore));
+        const total = applyFinancialAdjust(
+          combineTotal(attScore, statsScore, formula),
+          marketPctMap.get(idx) ?? null,
+          wagePctMap.get(idx) ?? null,
+          formula
+        );
         scores[`__att__${role}`] = attScore;
         scores[`__stats__${role}`] = statsScore;
         scores[`__total__${role}`] = total;
@@ -187,7 +233,7 @@ function SATable() {
       result.set(idx, scores);
     }
     return result;
-  }, [players, selectedRoles, aWeights, sWeights, attPercentiles, attNormalized, statsPercentiles, join]);
+  }, [players, selectedRoles, aWeights, sWeights, attPercentiles, attNormalized, statsPercentiles, join, formula, marketPctMap, wagePctMap]);
 
   const roleKeys = useMemo(() => new Set(roleColumns.map((c) => c.key)), [roleColumns]);
 
@@ -205,7 +251,7 @@ function SATable() {
     if (!players.length) return [] as { p: any; i: number }[];
     const q = search.toLowerCase().trim();
     const entries = Object.entries(colFilters).filter(([, f]) =>
-      f && ((f.text && f.text.trim()) || (f.min !== undefined && f.min !== "") || (f.max !== undefined && f.max !== ""))
+      f && ((f.text && f.text.trim()) || (f.min !== undefined && f.min !== "") || (f.max !== undefined && f.max !== "") || (f.pctMin !== undefined && f.pctMin !== "") || (f.pctMax !== undefined && f.pctMax !== ""))
     );
     const out: { p: any; i: number }[] = [];
     for (let i = 0; i < players.length; i++) {
@@ -228,6 +274,26 @@ function SATable() {
           if (isMoney) { const rng = parseMoney(rawVal); if (!rng || rng[0] > maxF) { ok = false; break; } }
           else { const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? "")); if (Number.isNaN(n) || n > maxF) { ok = false; break; } }
         }
+        // percentile filtering
+        if ((f.pctMin !== undefined && f.pctMin !== "") || (f.pctMax !== undefined && f.pctMax !== "")) {
+          const baseCol = col.startsWith(STATS_PREFIX) ? col.slice(STATS_PREFIX.length) : col;
+          const isStats = col.startsWith(STATS_PREFIX);
+          const pctMap = isStats ? statsPercentiles.get(baseCol) : attPercentiles.get(col);
+          const n = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? ""));
+          let pct: number | null = null;
+          if (!Number.isNaN(n) && pctMap) {
+            pct = pctMap.get(n) ?? null;
+          }
+          if (pct === null) { ok = false; break; }
+          if (f.pctMin !== undefined && f.pctMin !== "") {
+            const pMin = parseFloat(f.pctMin);
+            if (Number.isNaN(pMin) || pct < pMin) { ok = false; break; }
+          }
+          if (f.pctMax !== undefined && f.pctMax !== "") {
+            const pMax = parseFloat(f.pctMax);
+            if (Number.isNaN(pMax) || pct > pMax) { ok = false; break; }
+          }
+        }
       }
       if (ok) out.push({ p, i });
     }
@@ -245,11 +311,41 @@ function SATable() {
     }
     return out;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [players, search, colFilters, sortBy, roleScores, roleKeys, nameCol, join]);
+  }, [players, search, colFilters, sortBy, roleScores, roleKeys, nameCol, join, attPercentiles, statsPercentiles]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-  const pageRows = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-  useEffect(() => { setPage(1); }, [search, colFilters, sortBy]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, colFilters, sortBy, pageSize]);
+
+  // ===== Column reorder & resize helpers =====
+  function reorder(target: string, source: string) {
+    if (target === source) return;
+    setColOrder((curr) => {
+      const base = curr.length ? [...curr] : [...allColumns];
+      // ensure all known cols included
+      for (const c of allColumns) if (!base.includes(c)) base.push(c);
+      const filtered = base.filter((c) => c !== source);
+      const idx = filtered.indexOf(target);
+      filtered.splice(idx >= 0 ? idx : filtered.length, 0, source);
+      return filtered;
+    });
+  }
+  function startResize(e: React.MouseEvent, col: string) {
+    e.preventDefault(); e.stopPropagation();
+    const th = (e.target as HTMLElement).closest("th") as HTMLElement | null;
+    const startW = th ? th.getBoundingClientRect().width : (colWidths[col] || 120);
+    resizeRef.current = { col, startX: e.clientX, startW };
+    const move = (ev: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const dx = ev.clientX - resizeRef.current.startX;
+      const w = Math.max(60, Math.round(resizeRef.current.startW + dx));
+      setColWidths((cw) => ({ ...cw, [resizeRef.current!.col]: w }));
+    };
+    const up = () => { resizeRef.current = null; window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
+  function resetCols() { setColOrder([]); setColWidths({}); toast.success("Layout de colunas reposto"); }
 
   function exportExcel() {
     const data = filtered.map(({ p, i }) => {
@@ -272,8 +368,24 @@ function SATable() {
 
   function goToPlayer(p: any) {
     const k = join.keyFor(p);
-    navigate({ to: "/stats-att/player/$key", params: { key: encodeURIComponent(k) } });
+    try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify({ x: scrollRef.current?.scrollLeft ?? 0, y: scrollRef.current?.scrollTop ?? 0, w: window.scrollY })); } catch {}
+    navigate({ to: "/stats-att/player/$key", params: { key: k } });
   }
+
+  // Restore scroll position when returning to table
+  useEffect(() => {
+    if (!players.length) return;
+    try {
+      const raw = sessionStorage.getItem(SCROLL_KEY);
+      if (!raw) return;
+      const { x, y, w } = JSON.parse(raw);
+      requestAnimationFrame(() => {
+        if (scrollRef.current) { scrollRef.current.scrollLeft = x || 0; scrollRef.current.scrollTop = y || 0; }
+        if (typeof w === "number") window.scrollTo(0, w);
+      });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [players.length]);
 
   if (!players.length || !stats.length) {
     return (
@@ -289,12 +401,29 @@ function SATable() {
 
   const renderHeaderCell = (c: string, sticky = false) => {
     const isStats = c.startsWith(STATS_PREFIX);
+    const w = colWidths[c];
+    const style: React.CSSProperties = { top: 0, ...(w ? { width: w, minWidth: w, maxWidth: w } : {}) };
+    if (sticky) style.left = 0;
     return (
-      <th key={c} className={`px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap border-r border-border/40 ${sticky ? "sticky left-0 z-30 bg-gradient-to-r from-[oklch(0.22_0.05_290)] to-[oklch(0.2_0.04_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : isStats ? "bg-[oklch(0.2_0.06_200)]" : "bg-[oklch(0.2_0.04_285)]"}`}>
+      <th
+        key={c}
+        style={style}
+        draggable
+        onDragStart={(e) => { dragColRef.current = c; e.dataTransfer.effectAllowed = "move"; }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+        onDrop={(e) => { e.preventDefault(); const src = dragColRef.current; dragColRef.current = null; if (src) reorder(c, src); }}
+        className={`sticky ${sticky ? "z-40" : "z-30"} px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap border-r border-border/40 ${sticky ? "bg-gradient-to-r from-[oklch(0.22_0.05_290)] to-[oklch(0.2_0.04_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : isStats ? "bg-[oklch(0.2_0.06_200)]" : "bg-[oklch(0.2_0.04_285)]"}`}
+      >
         <button onClick={() => toggleSort(c)} className="inline-flex items-center gap-1 hover:text-primary">
+          <GripVertical className="h-3 w-3 opacity-40 cursor-grab" />
           {c}
           {sortBy?.col === c && (sortBy.dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
         </button>
+        <span
+          onMouseDown={(e) => startResize(e, c)}
+          className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-primary/60"
+          title="Arraste para redimensionar"
+        />
       </th>
     );
   };
@@ -304,18 +433,28 @@ function SATable() {
     const isNum = c.startsWith(STATS_PREFIX) ? statsNumeric.has(baseCol) : attNumeric.has(c);
     const isMoney = MONEY_COLS.has(c) || MONEY_COLS.has(baseCol);
     const listId = `dl-${c.replace(/\s+|:/g, "-")}`;
+    const style: React.CSSProperties = { top: 42 };
+    if (sticky) style.left = 0;
     return (
-      <th key={c} className={`px-2 py-1.5 border-r border-border/40 ${sticky ? "sticky left-0 z-30 bg-[oklch(0.17_0.03_285)] shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : "bg-[oklch(0.17_0.03_285)]"}`}>
+      <th key={c} style={style} className={`sticky ${sticky ? "z-40" : "z-20"} px-1.5 py-1 border-r border-border/40 bg-[oklch(0.17_0.03_285)] ${sticky ? "shadow-[2px_0_8px_oklch(0_0_0/0.4)]" : ""}`}>
         {isNum || isMoney ? (
-          <div className="flex gap-1">
-            <input type="number" placeholder={isMoney ? "Min €" : "Min"} className={`${isMoney ? "w-20" : "w-14"} rounded border border-border/60 bg-input px-1.5 py-1 text-xs`}
-              value={colFilters[c]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], min: e.target.value } })} />
-            <input type="number" placeholder={isMoney ? "Max €" : "Max"} className={`${isMoney ? "w-20" : "w-14"} rounded border border-border/60 bg-input px-1.5 py-1 text-xs`}
-              value={colFilters[c]?.max ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], max: e.target.value } })} />
+          <div className="flex flex-col gap-0.5">
+            <div className="flex gap-0.5">
+              <input type="number" placeholder={isMoney ? "Min" : "Min"} className={`${isMoney ? "w-14" : "w-10"} rounded border border-border/60 bg-input px-1 py-0.5 text-[11px]`}
+                value={colFilters[c]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], min: e.target.value } })} />
+              <input type="number" placeholder={isMoney ? "Max" : "Max"} className={`${isMoney ? "w-14" : "w-10"} rounded border border-border/60 bg-input px-1 py-0.5 text-[11px]`}
+                value={colFilters[c]?.max ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], max: e.target.value } })} />
+            </div>
+            <div className="flex gap-0.5">
+              <input type="number" min={0} max={100} placeholder="%Min" className={`${isMoney ? "w-14" : "w-10"} rounded border border-border/60 bg-input px-1 py-0.5 text-[10px] placeholder:text-muted-foreground/70`}
+                value={colFilters[c]?.pctMin ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], pctMin: e.target.value } })} />
+              <input type="number" min={0} max={100} placeholder="%Max" className={`${isMoney ? "w-14" : "w-10"} rounded border border-border/60 bg-input px-1 py-0.5 text-[10px] placeholder:text-muted-foreground/70`}
+                value={colFilters[c]?.pctMax ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], pctMax: e.target.value } })} />
+            </div>
           </div>
         ) : (
           <>
-            <input list={listId} placeholder="Filtrar..." className="w-full min-w-[100px] rounded border border-border/60 bg-input px-2 py-1 text-xs"
+            <input list={listId} placeholder="Filtrar" className="w-full min-w-[70px] rounded border border-border/60 bg-input px-1.5 py-0.5 text-[11px]"
               value={colFilters[c]?.text ?? ""} onChange={(e) => setColFilters({ ...colFilters, [c]: { ...colFilters[c], text: e.target.value } })} />
             <datalist id={listId}>{(filterSuggestions.get(c) ?? []).map((v) => <option key={v} value={v} />)}</datalist>
           </>
@@ -382,6 +521,13 @@ function SATable() {
             <button onClick={() => setShowFilters((v) => !v)} className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm hover:border-primary">
               <Filter className="h-4 w-4" /> {showFilters ? "Hide" : "Show"} Filters
             </button>
+            <button
+              onClick={() => { setColFilters({}); setSearch(""); setSortBy(null); toast.success("Filtros limpos"); }}
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm hover:border-danger hover:text-danger"
+              title="Limpar pesquisa, filtros por coluna e ordenação"
+            >
+              <X className="h-4 w-4" /> Limpar Filtros
+            </button>
             <button onClick={exportExcel} className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm hover:border-primary">
               <Download className="h-4 w-4" /> Export to Excel
             </button>
@@ -391,28 +537,43 @@ function SATable() {
               </button>
               {viewOpen && (
                 <div className="absolute right-0 top-full z-50 mt-2 max-h-[70vh] w-80 overflow-y-auto rounded-md border border-border bg-popover p-3 shadow-2xl">
+                  <div className="relative mb-2">
+                    <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <input autoFocus value={viewSearch} onChange={(e) => setViewSearch(e.target.value)} placeholder="Pesquisar att ou stat..."
+                      className="w-full rounded border border-border/60 bg-input pl-7 pr-2 py-1.5 text-sm outline-none focus:border-primary" />
+                  </div>
                   <div className="mb-2 flex gap-2 text-xs">
                     <button className="flex-1 rounded bg-secondary px-2 py-1" onClick={() => setHidden(new Set())}>View All</button>
                     <button className="flex-1 rounded bg-secondary px-2 py-1" onClick={() => setHidden(new Set(allColumns))}>Hide All</button>
                   </div>
-                  <div className="text-xs font-semibold text-muted-foreground mt-2 mb-1">Atributos</div>
-                  {attCols.map((c) => (
-                    <label key={c} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-secondary">
-                      <input type="checkbox" checked={!hidden.has(c)} onChange={(e) => {
-                        const n = new Set(hidden); if (e.target.checked) n.delete(c); else n.add(c); setHidden(n);
-                      }} />
-                      <span className="truncate">{c}</span>
-                    </label>
-                  ))}
-                  <div className="text-xs font-semibold text-muted-foreground mt-3 mb-1">Stats</div>
-                  {statsColsPrefixed.map((c) => (
-                    <label key={c} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-secondary">
-                      <input type="checkbox" checked={!hidden.has(c)} onChange={(e) => {
-                        const n = new Set(hidden); if (e.target.checked) n.delete(c); else n.add(c); setHidden(n);
-                      }} />
-                      <span className="truncate">{c.slice(STATS_PREFIX.length)}</span>
-                    </label>
-                  ))}
+                  {(() => {
+                    const q = viewSearch.toLowerCase().trim();
+                    const fAtt = q ? attCols.filter((c) => c.toLowerCase().includes(q)) : attCols;
+                    const fStats = q ? statsColsPrefixed.filter((c) => c.toLowerCase().includes(q) || c.slice(STATS_PREFIX.length).toLowerCase().includes(q)) : statsColsPrefixed;
+                    return (
+                      <>
+                        {fAtt.length > 0 && <div className="text-xs font-semibold text-muted-foreground mt-2 mb-1">Atributos</div>}
+                        {fAtt.map((c) => (
+                          <label key={c} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-secondary">
+                            <input type="checkbox" checked={!hidden.has(c)} onChange={(e) => {
+                              const n = new Set(hidden); if (e.target.checked) n.delete(c); else n.add(c); setHidden(n);
+                            }} />
+                            <span className="truncate">{c}</span>
+                          </label>
+                        ))}
+                        {fStats.length > 0 && <div className="text-xs font-semibold text-muted-foreground mt-3 mb-1">Stats</div>}
+                        {fStats.map((c) => (
+                          <label key={c} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-secondary">
+                            <input type="checkbox" checked={!hidden.has(c)} onChange={(e) => {
+                              const n = new Set(hidden); if (e.target.checked) n.delete(c); else n.add(c); setHidden(n);
+                            }} />
+                            <span className="truncate">{c.slice(STATS_PREFIX.length)}</span>
+                          </label>
+                        ))}
+                        {fAtt.length === 0 && fStats.length === 0 && <p className="px-2 py-1 text-sm text-muted-foreground">Sem resultados</p>}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -441,13 +602,13 @@ function SATable() {
           </div>
         </div>
 
-        <div className="overflow-auto rounded-xl table-shell">
+        <div ref={scrollRef} className="overflow-auto rounded-xl table-shell max-h-[calc(100vh-220px)]">
           <table className="w-full text-sm border-separate border-spacing-0">
-            <thead className="sticky top-0 z-20">
+            <thead>
               <tr>
                 {attBefore.map((c) => renderHeaderCell(c, c === nameCol))}
                 {roleColumns.map((rc) => (
-                  <th key={rc.key} className={`px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap border-r border-border/40 text-foreground ${
+                  <th key={rc.key} style={{ top: 0 }} className={`sticky z-30 px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap border-r border-border/40 text-foreground ${
                     rc.kind === "total" ? "bg-gradient-to-b from-[oklch(0.5_0.3_320)] to-[oklch(0.4_0.28_320)]"
                     : rc.kind === "att" ? "bg-gradient-to-b from-primary/50 to-primary/25"
                     : "bg-gradient-to-b from-[oklch(0.45_0.25_200)] to-[oklch(0.35_0.2_200)]"
@@ -465,7 +626,7 @@ function SATable() {
                 <tr>
                   {attBefore.map((c) => renderFilterCell(c, c === nameCol))}
                   {roleColumns.map((rc) => (
-                    <th key={rc.key} className="px-2 py-1.5 bg-[oklch(0.17_0.03_285)] border-r border-border/40">
+                    <th key={rc.key} style={{ top: 42 }} className="sticky z-20 px-2 py-1.5 bg-[oklch(0.17_0.03_285)] border-r border-border/40">
                       <div className="flex gap-1">
                         <input type="number" placeholder="Min" className="w-14 rounded border border-border/60 bg-input px-1.5 py-1 text-xs"
                           value={colFilters[rc.key]?.min ?? ""} onChange={(e) => setColFilters({ ...colFilters, [rc.key]: { ...colFilters[rc.key], min: e.target.value } })} />
@@ -500,7 +661,16 @@ function SATable() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
-          <div className="text-muted-foreground">{filtered.length.toLocaleString()} Results · {PER_PAGE}/página</div>
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <span>{filtered.length.toLocaleString()} Results</span>
+            <label className="flex items-center gap-2">
+              <span>Por página:</span>
+              <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} className="rounded border border-border bg-input px-2 py-1 text-xs">
+                {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            <button onClick={resetCols} className="rounded border border-border px-2 py-1 text-xs hover:border-primary" title="Repor ordem e largura das colunas">Repor colunas</button>
+          </div>
           <div className="flex items-center gap-3">
             <span>Page {page} of {totalPages}</span>
             <button disabled={page === 1} onClick={() => setPage(1)} className="rounded border border-border px-2 py-1 hover:border-primary disabled:opacity-40">«</button>

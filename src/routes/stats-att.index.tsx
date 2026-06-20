@@ -3,7 +3,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { useCallback, useState } from "react";
 import { Upload as UploadIcon, FileText, Check } from "lucide-react";
 import Papa from "papaparse";
-import { setSAStats, setSAAtt, useSAData, type PlayerRow } from "@/lib/stats-att-store";
+import { setSAStats, setSAAtt, useSAData, clearSAData, type PlayerRow } from "@/lib/stats-att-store";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/stats-att/")({
@@ -104,7 +104,19 @@ function SAUpload() {
           <DropZone label="Ficheiro Att" count={att.length} onFile={handleAtt} loading={loadingAtt} />
         </div>
 
-        <div className="mt-6 flex justify-end">
+        <div className="mt-6 flex justify-between gap-3">
+          <button
+            disabled={stats.length === 0 && att.length === 0}
+            onClick={() => {
+              if (confirm("Limpar todos os dados Stats+Att carregados?")) {
+                clearSAData();
+                toast.success("Dados limpos");
+              }
+            }}
+            className="rounded-md border border-destructive/50 px-4 py-2.5 text-sm font-semibold text-destructive hover:bg-destructive/10 disabled:opacity-40"
+          >
+            Limpar dados
+          </button>
           <button disabled={!canContinue} onClick={() => navigate({ to: "/stats-att/table" })}
             className="rounded-md bg-primary px-6 py-2.5 text-sm font-semibold btn-glow disabled:opacity-40">
             Continuar para tabela →

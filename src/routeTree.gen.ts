@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as StatAttLeakRouteImport } from './routes/stat-att-leak'
 import { Route as NunoStatsAttRouteImport } from './routes/nuno-stats-att'
 import { Route as MetricasGeminiRouteImport } from './routes/metricas-gemini'
 import { Route as DashboardRouteImport } from './routes/dashboard'
@@ -24,6 +25,11 @@ import { Route as AttWeightsRouteImport } from './routes/att.weights'
 import { Route as AttTableRouteImport } from './routes/att.table'
 import { Route as StatsAttPlayerKeyRouteImport } from './routes/stats-att.player.$key'
 
+const StatAttLeakRoute = StatAttLeakRouteImport.update({
+  id: '/stat-att-leak',
+  path: '/stat-att-leak',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NunoStatsAttRoute = NunoStatsAttRouteImport.update({
   id: '/nuno-stats-att',
   path: '/nuno-stats-att',
@@ -100,6 +106,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/metricas-gemini': typeof MetricasGeminiRoute
   '/nuno-stats-att': typeof NunoStatsAttRoute
+  '/stat-att-leak': typeof StatAttLeakRoute
   '/att/table': typeof AttTableRoute
   '/att/weights': typeof AttWeightsRoute
   '/stats-att/table': typeof StatsAttTableRoute
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/metricas-gemini': typeof MetricasGeminiRoute
   '/nuno-stats-att': typeof NunoStatsAttRoute
+  '/stat-att-leak': typeof StatAttLeakRoute
   '/att/table': typeof AttTableRoute
   '/att/weights': typeof AttWeightsRoute
   '/stats-att/table': typeof StatsAttTableRoute
@@ -133,6 +141,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/metricas-gemini': typeof MetricasGeminiRoute
   '/nuno-stats-att': typeof NunoStatsAttRoute
+  '/stat-att-leak': typeof StatAttLeakRoute
   '/att/table': typeof AttTableRoute
   '/att/weights': typeof AttWeightsRoute
   '/stats-att/table': typeof StatsAttTableRoute
@@ -151,6 +160,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/metricas-gemini'
     | '/nuno-stats-att'
+    | '/stat-att-leak'
     | '/att/table'
     | '/att/weights'
     | '/stats-att/table'
@@ -167,6 +177,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/metricas-gemini'
     | '/nuno-stats-att'
+    | '/stat-att-leak'
     | '/att/table'
     | '/att/weights'
     | '/stats-att/table'
@@ -183,6 +194,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/metricas-gemini'
     | '/nuno-stats-att'
+    | '/stat-att-leak'
     | '/att/table'
     | '/att/weights'
     | '/stats-att/table'
@@ -200,6 +212,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   MetricasGeminiRoute: typeof MetricasGeminiRoute
   NunoStatsAttRoute: typeof NunoStatsAttRoute
+  StatAttLeakRoute: typeof StatAttLeakRoute
   AttTableRoute: typeof AttTableRoute
   AttWeightsRoute: typeof AttWeightsRoute
   StatsAttTableRoute: typeof StatsAttTableRoute
@@ -214,6 +227,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/stat-att-leak': {
+      id: '/stat-att-leak'
+      path: '/stat-att-leak'
+      fullPath: '/stat-att-leak'
+      preLoaderRoute: typeof StatAttLeakRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/nuno-stats-att': {
       id: '/nuno-stats-att'
       path: '/nuno-stats-att'
@@ -320,6 +340,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   MetricasGeminiRoute: MetricasGeminiRoute,
   NunoStatsAttRoute: NunoStatsAttRoute,
+  StatAttLeakRoute: StatAttLeakRoute,
   AttTableRoute: AttTableRoute,
   AttWeightsRoute: AttWeightsRoute,
   StatsAttTableRoute: StatsAttTableRoute,
@@ -334,13 +355,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
